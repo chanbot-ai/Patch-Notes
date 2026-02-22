@@ -563,18 +563,16 @@ private struct ScreenshotCarousel: View {
         return ordered
     }
 
-    private var galleryURLs: [URL] {
-        var ordered = baseURLs
+    private var galleryPages: [[URL]] {
+        var pages = baseURLs.map(candidatesForGalleryPage)
 
-        appendYouTubeThumbnailVariants(from: baseURLs, into: &ordered)
+        // Keep gallery compact while ensuring each page has a fallback chain.
+        pages = Array(pages.prefix(8))
 
-        // Keep gallery compact while ensuring later pages still have likely-valid media.
-        ordered = Array(ordered.prefix(8))
-
-        if ordered.isEmpty {
-            ordered = [MediaFallback.gameScreenshot]
+        if pages.isEmpty {
+            pages = [[MediaFallback.gameScreenshot]]
         }
-        return ordered
+        return pages
     }
 
     var body: some View {
@@ -584,8 +582,12 @@ private struct ScreenshotCarousel: View {
                 .foregroundStyle(.white)
 
             TabView {
-                ForEach(galleryURLs, id: \.self) { url in
-                    RemoteMediaImage(primaryURL: url, fallbackURL: MediaFallback.gameScreenshot)
+                ForEach(Array(galleryPages.enumerated()), id: \.offset) { _, candidates in
+                    RemoteMediaImage(
+                        primaryURL: candidates.first,
+                        fallbackURL: MediaFallback.gameScreenshot,
+                        alternatePrimaryURLs: Array(candidates.dropFirst())
+                    )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .overlay {
                             LinearGradient(
@@ -620,17 +622,50 @@ private struct ScreenshotCarousel: View {
         }
     }
 
-    private func appendYouTubeThumbnailVariants(from seedURLs: [URL], into ordered: inout [URL]) {
-        let variants = ["0", "1", "2", "3", "hqdefault", "mqdefault"]
+    private func candidatesForGalleryPage(seedURL: URL) -> [URL] {
+        var ordered = [seedURL]
+        appendYouTubeThumbnailVariants(for: seedURL, into: &ordered)
+        return ordered
+    }
 
-        for seed in seedURLs {
-            guard let id = YouTubeIDParser.videoID(from: seed) else { continue }
+    private func appendYouTubeThumbnailVariants(for seedURL: URL, into ordered: inout [URL]) {
+        guard let id = YouTubeIDParser.videoID(from: seedURL) else { return }
 
-            for variant in variants {
-                guard let variantURL = URL(string: "https://i.ytimg.com/vi/\(id)/\(variant).jpg"),
-                      !ordered.contains(variantURL) else { continue }
-                ordered.append(variantURL)
+        for variant in preferredYouTubeVariants(for: seedURL) {
+            let candidateStrings = [
+                "https://i.ytimg.com/vi_webp/\(id)/\(variant).webp",
+                "https://i.ytimg.com/vi/\(id)/\(variant).jpg",
+                "https://img.youtube.com/vi/\(id)/\(variant).jpg"
+            ]
+
+            for candidate in candidateStrings {
+                guard let url = URL(string: candidate), !ordered.contains(url) else { continue }
+                ordered.append(url)
             }
         }
+    }
+
+    private func preferredYouTubeVariants(for seedURL: URL) -> [String] {
+        let numericVariants = ["0", "1", "2", "3"]
+        let namedVariants = ["maxresdefault", "sddefault", "hq720", "hqdefault", "mqdefault", "default"]
+
+        guard let seedVariant = youtubeThumbnailVariant(from: seedURL) else {
+            return namedVariants + numericVariants
+        }
+
+        if numericVariants.contains(seedVariant) {
+            return [seedVariant] + numericVariants.filter { $0 != seedVariant } + namedVariants
+        }
+
+        if namedVariants.contains(seedVariant) {
+            return [seedVariant] + namedVariants.filter { $0 != seedVariant } + numericVariants
+        }
+
+        return namedVariants + numericVariants
+    }
+
+    private func youtubeThumbnailVariant(from url: URL) -> String? {
+        let raw = url.deletingPathExtension().lastPathComponent
+        return raw.isEmpty ? nil : raw
     }
 }

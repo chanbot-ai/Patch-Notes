@@ -125,19 +125,51 @@ enum MediaFallback {
 
 struct RemoteMediaImage: View {
     let primaryURL: URL?
+    let alternatePrimaryURLs: [URL]
     let fallbackURL: URL
+
+    @State private var candidateIndex = 0
+
+    init(primaryURL: URL?, fallbackURL: URL, alternatePrimaryURLs: [URL] = []) {
+        self.primaryURL = primaryURL
+        self.alternatePrimaryURLs = alternatePrimaryURLs
+        self.fallbackURL = fallbackURL
+    }
+
+    private var candidateURLs: [URL] {
+        var ordered: [URL] = []
+        if let primaryURL {
+            ordered.append(primaryURL)
+        }
+        for url in alternatePrimaryURLs where !ordered.contains(url) {
+            ordered.append(url)
+        }
+        return ordered
+    }
+
+    private var activeCandidateURL: URL? {
+        guard candidateURLs.indices.contains(candidateIndex) else { return nil }
+        return candidateURLs[candidateIndex]
+    }
 
     var body: some View {
         Group {
-            if let primaryURL {
-                AsyncImage(url: primaryURL) { phase in
+            if let activeCandidateURL {
+                AsyncImage(url: activeCandidateURL) { phase in
                     switch phase {
                     case .empty:
                         loadingView
                     case .success(let image):
                         resolvedImage(image)
                     case .failure:
-                        fallbackImage
+                        if hasRemainingCandidate(after: activeCandidateURL) {
+                            loadingView
+                                .onAppear {
+                                    advanceCandidate(after: activeCandidateURL)
+                                }
+                        } else {
+                            fallbackImage
+                        }
                     @unknown default:
                         fallbackImage
                     }
@@ -145,6 +177,9 @@ struct RemoteMediaImage: View {
             } else {
                 fallbackImage
             }
+        }
+        .onChange(of: candidateURLs) { _, _ in
+            candidateIndex = 0
         }
     }
 
@@ -182,6 +217,17 @@ struct RemoteMediaImage: View {
         image
             .resizable()
             .scaledToFill()
+    }
+
+    private func hasRemainingCandidate(after url: URL) -> Bool {
+        guard let index = candidateURLs.firstIndex(of: url) else { return false }
+        return index + 1 < candidateURLs.count
+    }
+
+    private func advanceCandidate(after failedURL: URL) {
+        guard let activeCandidateURL, activeCandidateURL == failedURL else { return }
+        guard candidateIndex + 1 < candidateURLs.count else { return }
+        candidateIndex += 1
     }
 }
 
