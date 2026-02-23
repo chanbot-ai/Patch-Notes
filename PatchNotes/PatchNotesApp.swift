@@ -4,12 +4,133 @@ import SwiftUI
 struct PatchNotesApp: App {
     @StateObject private var store = AppStore()
     @StateObject private var settings = AppSettings()
+    @StateObject private var authManager = AuthManager()
 
     var body: some Scene {
         WindowGroup {
-            AppBootstrapView()
+            Group {
+                if authManager.session != nil {
+                    AuthenticatedRootView()
+                } else {
+                    AuthView()
+                }
+            }
                 .environmentObject(store)
                 .environmentObject(settings)
+                .environmentObject(authManager)
+        }
+    }
+}
+
+private struct AuthenticatedRootView: View {
+    @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var settings: AppSettings
+
+    @StateObject private var profileGate = ProfileGateViewModel()
+
+    var body: some View {
+        Group {
+            switch profileGate.phase {
+            case .idle, .loading:
+                ZStack {
+                    AppBackground()
+
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .tint(.white)
+                            .scaleEffect(1.1)
+                        Text("Loading profile…")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.80))
+                    }
+                }
+                .preferredColorScheme(.dark)
+
+            case .needsCompletion(let profile):
+                ProfileOnboardingView(
+                    profile: profile,
+                    fallbackEmail: authManager.session?.user.email,
+                    isSaving: profileGate.isSaving,
+                    errorMessage: profileGate.saveErrorMessage,
+                    successMessage: profileGate.saveSuccessMessage
+                ) { displayName, username in
+                    await profileGate.completeProfile(
+                        session: authManager.session,
+                        displayName: displayName,
+                        username: username
+                    )
+                }
+
+            case .ready:
+                AppBootstrapView()
+
+            case .error(let message):
+                ZStack {
+                    AppBackground()
+
+                    VStack(spacing: 16) {
+                        GlassCard {
+                            VStack(alignment: .leading, spacing: 14) {
+                                Text("Profile Setup Error")
+                                    .font(.title3.weight(.bold))
+                                    .fontDesign(.rounded)
+                                    .foregroundStyle(.white)
+
+                                Text(message)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white.opacity(0.80))
+
+                                Button {
+                                    Task {
+                                        await profileGate.refresh(session: authManager.session)
+                                    }
+                                } label: {
+                                    Text("Retry")
+                                        .font(.headline.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(
+                                            LinearGradient(
+                                                colors: [AppTheme.accent, AppTheme.accentBlue],
+                                                startPoint: .leading,
+                                                endPoint: .trailing
+                                            ),
+                                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+
+                                Button("Sign Out", role: .destructive) {
+                                    Task { try? await authManager.signOut() }
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.white.opacity(0.72))
+                                .frame(maxWidth: .infinity)
+                            }
+                        }
+                    }
+                    .padding(16)
+                }
+                .preferredColorScheme(.dark)
+            }
+        }
+        .task(id: authManager.session?.user.id) {
+            if let email = authManager.session?.user.email, !email.isEmpty {
+                settings.accountEmail = email
+            }
+            await profileGate.refresh(session: authManager.session)
+        }
+        .onChange(of: profileGate.currentProfile) { _, profile in
+            guard let profile else { return }
+
+            if let profileEmail = profile.email?.trimmingCharacters(in: .whitespacesAndNewlines), !profileEmail.isEmpty {
+                settings.accountEmail = profileEmail
+            }
+
+            let preferredName = profile.preferredDisplayName
+            if !preferredName.isEmpty {
+                settings.displayName = preferredName
+            }
         }
     }
 }

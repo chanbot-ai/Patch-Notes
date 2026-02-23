@@ -17,7 +17,7 @@ struct RootTabView: View {
 
             TabView(selection: $selectedTab) {
                 NavigationStack {
-                    HomeView()
+                    FeedView()
                 }
                 .tag(AppTab.home)
                 .tabItem {
@@ -202,6 +202,10 @@ private struct SettingsSheetView: View {
 
 private struct AccountManagementView: View {
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var authManager: AuthManager
+
+    @State private var isSigningOut = false
+    @State private var signOutErrorMessage: String?
 
     var body: some View {
         Form {
@@ -216,11 +220,36 @@ private struct AccountManagementView: View {
 
             Section("Account") {
                 Button("Manage Subscription") {}
-                Button("Sign Out") {}
+
+                Button(isSigningOut ? "Signing Out..." : "Sign Out") {
+                    signOut()
+                }
+                .disabled(isSigningOut)
                     .foregroundStyle(.red)
+
+                if let signOutErrorMessage {
+                    Text(signOutErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
             }
         }
         .navigationTitle("Account")
+    }
+
+    private func signOut() {
+        Task {
+            isSigningOut = true
+            signOutErrorMessage = nil
+            defer { isSigningOut = false }
+
+            do {
+                try await authManager.signOut()
+            } catch {
+                signOutErrorMessage = error.localizedDescription
+                print("Sign out failed:", error)
+            }
+        }
     }
 }
 

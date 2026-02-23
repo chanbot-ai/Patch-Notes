@@ -1,2 +1,7 @@
 .DS_Store
 **/.DS_Store
+
+# Local Supabase tooling / credentials (never commit secrets)
+.env.supabase.local
+tools/bin/
+supabase/.temp/
