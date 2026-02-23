@@ -2,6 +2,16 @@ import Foundation
 import Supabase
 
 final class FeedService {
+    private struct ReactionInsertPayload: Encodable {
+        let post_id: UUID
+        let user_id: UUID
+        let reaction_type_id: UUID
+    }
+
+    private struct UserReactionRow: Decodable {
+        let post_id: UUID
+        let reaction_type_id: UUID
+    }
 
     private let client = SupabaseManager.shared.client
     private var postMetricsChannel: RealtimeChannelV2?
@@ -36,6 +46,13 @@ final class FeedService {
         formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
         return formatter
     }()
+
+    func subscribeToPostMetrics(
+        onChange: @escaping @MainActor @Sendable (UUID?) -> Void
+    ) {
+        onPostMetricsChange = onChange
+        subscribeToPostMetrics()
+    }
 
     func subscribeToPostMetrics() {
         guard postMetricsChannel == nil else { return }
@@ -74,22 +91,108 @@ final class FeedService {
             .limit(50)
             .execute()
 
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let raw = try container.decode(String.self)
+        return try makePostDecoder().decode([Post].self, from: response.data)
+    }
 
-            if let date = Self.iso8601WithFractionalSeconds.date(from: raw)
-                ?? Self.iso8601.date(from: raw)
-                ?? Self.postgresTimestampWithFractionalSeconds.date(from: raw)
-                ?? Self.postgresTimestamp.date(from: raw) {
-                return date
-            }
+    func fetchPost(postID: UUID) async throws -> Post? {
+        let response = try await client
+            .from("hot_feed_view")
+            .select()
+            .eq("id", value: postID.uuidString)
+            .limit(1)
+            .execute()
 
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 date: \(raw)")
+        let posts = try makePostDecoder().decode([Post].self, from: response.data)
+        return posts.first
+    }
+
+    func fetchReactionTypes() async throws -> [ReactionType] {
+        let response = try await client
+            .from("reaction_types")
+            .select("id,slug,display_name,emoji")
+            .order("slug", ascending: true)
+            .execute()
+
+        return try JSONDecoder().decode([ReactionType].self, from: response.data)
+    }
+
+    func fetchReactionCounts(postID: UUID) async throws -> [PostReactionCount] {
+        let response = try await client
+            .from("post_reaction_counts")
+            .select("post_id,reaction_type_id,count")
+            .eq("post_id", value: postID.uuidString)
+            .execute()
+
+        return try JSONDecoder().decode([PostReactionCount].self, from: response.data)
+    }
+
+    func fetchReactionCounts(postIDs: [UUID]) async throws -> [UUID: [PostReactionCount]] {
+        guard !postIDs.isEmpty else { return [:] }
+
+        let response = try await client
+            .from("post_reaction_counts")
+            .select("post_id,reaction_type_id,count")
+            .in("post_id", values: postIDs.map(\.uuidString))
+            .execute()
+
+        let rows = try JSONDecoder().decode([PostReactionCount].self, from: response.data)
+        return Dictionary(grouping: rows, by: \.post_id)
+    }
+
+    func fetchViewerReactionsByPost(
+        userID: UUID,
+        postIDs: [UUID]
+    ) async throws -> [UUID: Set<UUID>] {
+        guard !postIDs.isEmpty else { return [:] }
+
+        let response = try await client
+            .from("reactions")
+            .select("post_id,reaction_type_id")
+            .eq("user_id", value: userID.uuidString)
+            .in("post_id", values: postIDs.map(\.uuidString))
+            .execute()
+
+        let rows = try JSONDecoder().decode([UserReactionRow].self, from: response.data)
+        var result: [UUID: Set<UUID>] = [:]
+        for row in rows {
+            result[row.post_id, default: []].insert(row.reaction_type_id)
         }
+        return result
+    }
 
-        return try decoder.decode([Post].self, from: response.data)
+    func addReaction(
+        postId: UUID,
+        reactionTypeId: UUID,
+        userId: UUID,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await client
+            .from("reactions")
+            .insert(
+                ReactionInsertPayload(
+                    post_id: postId,
+                    user_id: userId,
+                    reaction_type_id: reactionTypeId
+                )
+            )
+            .execute()
+    }
+
+    func removeReaction(
+        postId: UUID,
+        reactionTypeId: UUID,
+        userId: UUID,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await client
+            .from("reactions")
+            .delete()
+            .eq("post_id", value: postId.uuidString)
+            .eq("user_id", value: userId.uuidString)
+            .eq("reaction_type_id", value: reactionTypeId.uuidString)
+            .execute()
     }
 
     private static func postID(from action: AnyAction) -> UUID? {
@@ -106,5 +209,23 @@ final class FeedService {
     private static func uuid(from record: [String: AnyJSON]) -> UUID? {
         guard let postID = record["post_id"]?.stringValue else { return nil }
         return UUID(uuidString: postID)
+    }
+
+    private func makePostDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let raw = try container.decode(String.self)
+
+            if let date = Self.iso8601WithFractionalSeconds.date(from: raw)
+                ?? Self.iso8601.date(from: raw)
+                ?? Self.postgresTimestampWithFractionalSeconds.date(from: raw)
+                ?? Self.postgresTimestamp.date(from: raw) {
+                return date
+            }
+
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 date: \(raw)")
+        }
+        return decoder
     }
 }

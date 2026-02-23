@@ -4,13 +4,13 @@ import Supabase
 
 struct FeedView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var store: AppStore
 
-    @StateObject private var viewModel = FeedViewModel()
     @State private var showingComposer = false
 
     var body: some View {
         List {
-            if viewModel.isLoading && viewModel.posts.isEmpty {
+            if store.feedIsLoading && store.posts.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Loading feed...")
@@ -18,7 +18,7 @@ struct FeedView: View {
                 }
             }
 
-            if let errorMessage = viewModel.errorMessage {
+            if let errorMessage = store.feedErrorMessage {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Feed Error")
                         .font(.headline)
@@ -30,7 +30,7 @@ struct FeedView: View {
                 .foregroundStyle(.red)
             }
 
-            if !viewModel.isLoading && viewModel.posts.isEmpty && viewModel.errorMessage == nil {
+            if !store.feedIsLoading && store.posts.isEmpty && store.feedErrorMessage == nil {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("No posts yet")
                         .font(.headline)
@@ -40,8 +40,17 @@ struct FeedView: View {
                 }
             }
 
-            ForEach(viewModel.posts) { post in
-                FeedPostRow(post: post)
+            ForEach(store.posts) { post in
+                FeedPostRow(
+                    post: post,
+                    reactionCountOverride: store.reactionTotal(for: post),
+                    reactionTypes: store.reactionTypes,
+                    reactionCounts: store.reactionCountsByPost[post.id] ?? [],
+                    selectedReactionTypeIDs: store.viewerReactionTypeIDsByPost[post.id] ?? [],
+                    onReact: { reactionTypeID in
+                        store.react(to: post.id, with: reactionTypeID)
+                    }
+                )
                     .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -63,24 +72,35 @@ struct FeedView: View {
         .sheet(isPresented: $showingComposer) {
             NavigationStack {
                 PostComposerView {
-                    viewModel.loadFeed()
+                    store.loadHotFeed()
                 }
                 .environmentObject(authManager)
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .onAppear {
-            viewModel.loadFeed()
-        }
         .refreshable {
-            viewModel.loadFeed()
+            await store.refreshHotFeed()
         }
+        .overlay(alignment: .top) {
+            if let reactionErrorMessage = store.reactionErrorMessage {
+                ReactionErrorToast(message: reactionErrorMessage)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: store.reactionErrorMessage)
     }
 }
 
 private struct FeedPostRow: View {
     let post: Post
+    let reactionCountOverride: Int
+    let reactionTypes: [ReactionType]
+    let reactionCounts: [PostReactionCount]
+    let selectedReactionTypeIDs: Set<UUID>
+    let onReact: (UUID) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -104,8 +124,45 @@ private struct FeedPostRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            if !reactionTypes.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(reactionTypes) { type in
+                            let count = reactionCounts.first(where: { $0.reactionTypeID == type.id })?.count ?? 0
+                            let isSelected = selectedReactionTypeIDs.contains(type.id)
+
+                            Button {
+                                onReact(type.id)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(type.emoji)
+                                    Text("\(count)")
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .foregroundStyle(.white.opacity(isSelected ? 0.96 : 0.78))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(
+                                    (isSelected ? AppTheme.accent.opacity(0.22) : Color.white.opacity(0.06)),
+                                    in: Capsule()
+                                )
+                                .overlay {
+                                    Capsule()
+                                        .stroke(
+                                            isSelected ? AppTheme.accent.opacity(0.45) : Color.white.opacity(0.08),
+                                            lineWidth: 1
+                                        )
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
             HStack(spacing: 12) {
-                Label("\(post.reaction_count ?? 0)", systemImage: "face.smiling")
+                Label("\(reactionCountOverride)", systemImage: "face.smiling")
                 Label("\(post.comment_count ?? 0)", systemImage: "bubble.right")
                 if let hotScore = post.hot_score {
                     Label(String(format: "%.1f", hotScore), systemImage: "flame.fill")
@@ -129,6 +186,33 @@ private struct FeedPostRow: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         }
+    }
+}
+
+private struct ReactionErrorToast: View {
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.45))
+            Text(message)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.black.opacity(0.85))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.red.opacity(0.35), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.22), radius: 10, y: 6)
     }
 }
 

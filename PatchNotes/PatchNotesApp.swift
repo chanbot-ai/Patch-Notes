@@ -18,6 +18,16 @@ struct PatchNotesApp: App {
                 .environmentObject(store)
                 .environmentObject(settings)
                 .environmentObject(authManager)
+                .onAppear {
+                    store.setAuthenticatedSession(authManager.session)
+                    guard authManager.session != nil else { return }
+                    store.startHotFeed()
+                }
+                .onChange(of: authManager.session?.user.id) { _, userID in
+                    store.setAuthenticatedSession(authManager.session)
+                    guard userID != nil else { return }
+                    store.startHotFeed()
+                }
         }
     }
 }

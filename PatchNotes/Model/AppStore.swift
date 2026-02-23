@@ -1,4 +1,6 @@
 import Foundation
+import SwiftUI
+import Supabase
 
 protocol AppDataProviding {
     func makeSeedData(referenceDate: Date) -> AppSeedData
@@ -12,6 +14,14 @@ struct MockAppDataProvider: AppDataProviding {
 
 @MainActor
 final class AppStore: ObservableObject {
+    @Published private(set) var posts: [Post]
+    @Published private(set) var reactionTypes: [ReactionType]
+    @Published private(set) var reactionCountsByPost: [UUID: [PostReactionCount]]
+    @Published private(set) var viewerReactionTypeIDsByPost: [UUID: Set<UUID>]
+    @Published private(set) var reactionTotalsByPost: [UUID: Int]
+    @Published private(set) var reactionErrorMessage: String?
+    @Published private(set) var feedIsLoading: Bool
+    @Published private(set) var feedErrorMessage: String?
     @Published private(set) var ownedGames: [Game]
     @Published private(set) var upcomingReleases: [Game]
     @Published private(set) var favoriteReleaseIDs: Set<Game.ID>
@@ -23,12 +33,24 @@ final class AppStore: ObservableObject {
     private var threadsByGame: [Game.ID: [ThreadPost]]
     private let calendar = Calendar.current
     private let dataProvider: AppDataProviding
+    private let feedService = FeedService()
+    private var hasSubscribed = false
+    private var authenticatedSession: Session?
+    private var reactionErrorDismissTask: Task<Void, Never>?
 
     init(
         dataProvider: AppDataProviding = MockAppDataProvider(),
         referenceDate: Date = Date()
     ) {
         self.dataProvider = dataProvider
+        self.posts = []
+        self.reactionTypes = []
+        self.reactionCountsByPost = [:]
+        self.viewerReactionTypeIDsByPost = [:]
+        self.reactionTotalsByPost = [:]
+        self.reactionErrorMessage = nil
+        self.feedIsLoading = false
+        self.feedErrorMessage = nil
         self.ownedGames = []
         self.upcomingReleases = []
         self.favoriteReleaseIDs = []
@@ -38,6 +60,7 @@ final class AppStore: ObservableObject {
         self.esportsMarkets = []
         self.threadsByGame = [:]
         refresh(referenceDate: referenceDate)
+        configureFeedOwnership()
     }
 
     var favoritedReleases: [Game] {
@@ -118,6 +141,381 @@ final class AppStore: ObservableObject {
             favoriteReleaseIDs = favoriteReleaseIDs
                 .intersection(Set(upcomingReleases.map(\.id)))
         }
+    }
+
+    func startHotFeed() {
+        loadReactionTypes()
+        subscribeToFeedRealtime()
+        if posts.isEmpty && !feedIsLoading {
+            loadHotFeed()
+        }
+    }
+
+    func setAuthenticatedSession(_ session: Session?) {
+        authenticatedSession = session
+        if session == nil {
+            viewerReactionTypeIDsByPost = [:]
+            reactionErrorMessage = nil
+        }
+    }
+
+    func loadReactionTypes() {
+        Task {
+            await refreshReactionTypes()
+        }
+    }
+
+    func loadHotFeed() {
+        Task {
+            await refreshHotFeed()
+        }
+    }
+
+    func subscribeToFeedRealtime() {
+        guard !hasSubscribed else { return }
+        hasSubscribed = true
+        feedService.subscribeToPostMetrics { [weak self] updatedPostID in
+            guard let self else { return }
+            if let updatedPostID {
+                Task { await self.refreshPost(postId: updatedPostID) }
+            }
+        }
+    }
+
+    func refreshHotFeed() async {
+        subscribeToFeedRealtime()
+        feedIsLoading = true
+        feedErrorMessage = nil
+        defer { feedIsLoading = false }
+
+        do {
+            let fetchedPosts = try await feedService.fetchHotFeed()
+            applyHotFeedPosts(fetchedPosts, animated: false)
+            let postIDs = fetchedPosts.map(\.id)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.refreshReactionState(for: postIDs)
+            }
+        } catch {
+            feedErrorMessage = error.localizedDescription
+            print("Error loading hot feed:", error)
+        }
+    }
+
+    func refreshPost(postId: UUID) async {
+        do {
+            guard let updated = try await feedService.fetchPost(postID: postId) else {
+                if let index = posts.firstIndex(where: { $0.id == postId }) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        var nextPosts = posts
+                        nextPosts.remove(at: index)
+                        posts = nextPosts
+
+                        var nextTotals = reactionTotalsByPost
+                        nextTotals.removeValue(forKey: postId)
+                        reactionTotalsByPost = nextTotals
+
+                        var nextCounts = reactionCountsByPost
+                        nextCounts.removeValue(forKey: postId)
+                        reactionCountsByPost = nextCounts
+
+                        var nextViewerSelections = viewerReactionTypeIDsByPost
+                        nextViewerSelections.removeValue(forKey: postId)
+                        viewerReactionTypeIDsByPost = nextViewerSelections
+                    }
+                }
+                return
+            }
+
+            if let index = posts.firstIndex(where: { $0.id == postId }) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    var nextPosts = posts
+                    nextPosts[index] = updated
+                    nextPosts.sort(by: Self.sortPosts)
+                    posts = nextPosts
+
+                    var nextTotals = reactionTotalsByPost
+                    nextTotals[postId] = updated.reaction_count ?? 0
+                    reactionTotalsByPost = nextTotals
+                }
+                await refreshReactionState(for: [postId])
+            } else {
+                // No full-feed realtime refetch here; manual refresh/load can reconcile membership.
+            }
+        } catch {
+            print("Failed to refresh post:", error)
+        }
+    }
+
+    func react(to postId: UUID, with reactionTypeId: UUID) {
+        guard let session = authenticatedSession else {
+            showReactionError("Sign in again to add reactions.")
+            return
+        }
+        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else {
+            showReactionError("Your session expired. Sign in again to react.")
+            return
+        }
+
+        let userId = session.user.id
+        let currentlySelected = viewerReactionTypeIDsByPost[postId, default: []].contains(reactionTypeId)
+        let previousCounts = reactionCountsByPost[postId] ?? []
+        let previousSelected = viewerReactionTypeIDsByPost[postId] ?? []
+        let previousTotal = reactionTotalsByPost[postId] ?? posts.first(where: { $0.id == postId })?.reaction_count ?? 0
+
+        applyOptimisticReactionMutation(
+            postId: postId,
+            reactionTypeId: reactionTypeId,
+            isRemoving: currentlySelected
+        )
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                if currentlySelected {
+                    try await self.feedService.removeReaction(
+                        postId: postId,
+                        reactionTypeId: reactionTypeId,
+                        userId: userId,
+                        accessToken: accessToken
+                    )
+                } else {
+                    try await self.feedService.addReaction(
+                        postId: postId,
+                        reactionTypeId: reactionTypeId,
+                        userId: userId,
+                        accessToken: accessToken
+                    )
+                }
+                clearReactionError()
+                // Metrics + counts reconcile through realtime callbacks.
+            } catch {
+                var nextCounts = self.reactionCountsByPost
+                nextCounts[postId] = previousCounts
+                self.reactionCountsByPost = nextCounts
+
+                var nextViewerSelections = self.viewerReactionTypeIDsByPost
+                nextViewerSelections[postId] = previousSelected
+                self.viewerReactionTypeIDsByPost = nextViewerSelections
+
+                var nextTotals = self.reactionTotalsByPost
+                nextTotals[postId] = previousTotal
+                self.reactionTotalsByPost = nextTotals
+
+                self.showReactionError(self.friendlyReactionErrorMessage(for: error))
+                print("Reaction toggle failed:", error)
+                await self.refreshReactionState(for: [postId])
+                await self.refreshPost(postId: postId)
+            }
+        }
+    }
+
+    func reactionTotal(for post: Post) -> Int {
+        reactionTotalsByPost[post.id] ?? post.reaction_count ?? 0
+    }
+
+    func reactionCount(for postId: UUID, reactionTypeId: UUID) -> Int {
+        reactionCountsByPost[postId]?
+            .first(where: { $0.reactionTypeID == reactionTypeId })?
+            .count ?? 0
+    }
+
+    func hasReacted(to postId: UUID, reactionTypeId: UUID) -> Bool {
+        viewerReactionTypeIDsByPost[postId, default: []].contains(reactionTypeId)
+    }
+
+    func loadReactionCounts(for postId: UUID) {
+        Task {
+            await refreshReactionCounts(for: [postId])
+        }
+    }
+
+    private func configureFeedOwnership() {
+        // reserved for future centralized store wiring (e.g., notifications/analytics hooks)
+    }
+
+    private func clearReactionError() {
+        reactionErrorDismissTask?.cancel()
+        reactionErrorDismissTask = nil
+        reactionErrorMessage = nil
+    }
+
+    private func showReactionError(_ message: String) {
+        reactionErrorDismissTask?.cancel()
+        reactionErrorMessage = message
+        reactionErrorDismissTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.reactionErrorMessage = nil
+        }
+    }
+
+    private func friendlyReactionErrorMessage(for error: Error) -> String {
+        let raw = [error.localizedDescription, String(describing: error)]
+            .joined(separator: " | ")
+            .lowercased()
+
+        if raw.contains("duplicate key") || raw.contains("reactions_post_id_user_id_reaction_type_id_key") {
+            return "That reaction is already applied."
+        }
+        if raw.contains("42501") || raw.contains("row-level security") || raw.contains("permission") {
+            return "Your account does not have permission to react yet."
+        }
+        if raw.contains("network") || raw.contains("offline") {
+            return "Couldn’t update reaction. Check your connection and try again."
+        }
+        return "Couldn’t update reaction right now. Try again."
+    }
+
+    private func refreshReactionTypes() async {
+        do {
+            reactionTypes = try await feedService.fetchReactionTypes()
+        } catch {
+            print("Failed to load reaction types:", error)
+        }
+    }
+
+    private func refreshReactionState(for postIDs: [UUID]) async {
+        await refreshReactionCounts(for: postIDs)
+        await loadViewerReactions(for: postIDs)
+    }
+
+    private func refreshReactionCounts(for postIDs: [UUID]) async {
+        let visiblePostIDs = Set(posts.map(\.id))
+        let targetPostIDs = postIDs.filter { visiblePostIDs.contains($0) }
+        guard !targetPostIDs.isEmpty else { return }
+
+        do {
+            let grouped = try await feedService.fetchReactionCounts(postIDs: targetPostIDs)
+            var nextCountsByPost = reactionCountsByPost
+            var nextTotalsByPost = reactionTotalsByPost
+
+            for postID in targetPostIDs {
+                let counts = grouped[postID] ?? []
+                nextCountsByPost[postID] = counts
+                nextTotalsByPost[postID] = counts.reduce(0) { $0 + $1.count }
+            }
+
+            reactionCountsByPost = nextCountsByPost
+            reactionTotalsByPost = nextTotalsByPost
+        } catch {
+            print("Failed to load reaction counts:", error)
+        }
+    }
+
+    private func loadViewerReactions(for postIDs: [UUID]) async {
+        guard let session = authenticatedSession else { return }
+
+        let visiblePostIDs = Set(posts.map(\.id))
+        let targetPostIDs = postIDs.filter { visiblePostIDs.contains($0) }
+        guard !targetPostIDs.isEmpty else { return }
+
+        do {
+            let grouped = try await feedService.fetchViewerReactionsByPost(
+                userID: session.user.id,
+                postIDs: targetPostIDs
+            )
+
+            var nextViewerSelections = viewerReactionTypeIDsByPost
+            for postID in targetPostIDs {
+                nextViewerSelections[postID] = grouped[postID] ?? []
+            }
+            viewerReactionTypeIDsByPost = nextViewerSelections
+        } catch {
+            print("Failed to load viewer reactions:", error)
+        }
+    }
+
+    private func applyHotFeedPosts(_ newPosts: [Post], animated: Bool) {
+        let previousBreakdowns = reactionCountsByPost
+        let previousViewerSelections = viewerReactionTypeIDsByPost
+        let assign = {
+            self.posts = newPosts
+            self.reactionTotalsByPost = Dictionary(
+                uniqueKeysWithValues: newPosts.map { ($0.id, $0.reaction_count ?? 0) }
+            )
+            self.reactionCountsByPost = Dictionary(
+                uniqueKeysWithValues: newPosts.map { ($0.id, previousBreakdowns[$0.id] ?? []) }
+            )
+            self.viewerReactionTypeIDsByPost = Dictionary(
+                uniqueKeysWithValues: newPosts.map { ($0.id, previousViewerSelections[$0.id] ?? []) }
+            )
+        }
+
+        if animated {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                assign()
+            }
+        } else {
+            assign()
+        }
+    }
+
+    private static func sortPosts(_ lhs: Post, _ rhs: Post) -> Bool {
+        if (lhs.hot_score ?? .leastNormalMagnitude) == (rhs.hot_score ?? .leastNormalMagnitude) {
+            return lhs.created_at > rhs.created_at
+        }
+        return (lhs.hot_score ?? .leastNormalMagnitude) > (rhs.hot_score ?? .leastNormalMagnitude)
+    }
+
+    private static func incrementReactionCount(
+        _ counts: [PostReactionCount],
+        postID: UUID,
+        reactionTypeID: UUID
+    ) -> [PostReactionCount] {
+        var next = counts
+        if let index = next.firstIndex(where: { $0.reactionTypeID == reactionTypeID }) {
+            next[index].count += 1
+        } else {
+            next.append(PostReactionCount(post_id: postID, reaction_type_id: reactionTypeID, count: 1))
+        }
+        return next
+    }
+
+    private static func decrementReactionCount(
+        _ counts: [PostReactionCount],
+        reactionTypeID: UUID
+    ) -> [PostReactionCount] {
+        var next = counts
+        guard let index = next.firstIndex(where: { $0.reactionTypeID == reactionTypeID }) else {
+            return next
+        }
+        next[index].count -= 1
+        if next[index].count <= 0 {
+            next.remove(at: index)
+        }
+        return next
+    }
+
+    private func applyOptimisticReactionMutation(
+        postId: UUID,
+        reactionTypeId: UUID,
+        isRemoving: Bool
+    ) {
+        let previousCounts = reactionCountsByPost[postId] ?? []
+        let previousTotal = reactionTotalsByPost[postId] ?? posts.first(where: { $0.id == postId })?.reaction_count ?? 0
+        let previousSelected = viewerReactionTypeIDsByPost[postId] ?? []
+
+        var nextCountsByPost = reactionCountsByPost
+        nextCountsByPost[postId] = isRemoving
+            ? Self.decrementReactionCount(previousCounts, reactionTypeID: reactionTypeId)
+            : Self.incrementReactionCount(previousCounts, postID: postId, reactionTypeID: reactionTypeId)
+        reactionCountsByPost = nextCountsByPost
+
+        var nextTotalsByPost = reactionTotalsByPost
+        nextTotalsByPost[postId] = isRemoving ? max(previousTotal - 1, 0) : previousTotal + 1
+        reactionTotalsByPost = nextTotalsByPost
+
+        var nextSelected = previousSelected
+        if isRemoving {
+            nextSelected.remove(reactionTypeId)
+        } else {
+            nextSelected.insert(reactionTypeId)
+        }
+        var nextViewerSelections = viewerReactionTypeIDsByPost
+        nextViewerSelections[postId] = nextSelected
+        viewerReactionTypeIDsByPost = nextViewerSelections
     }
 }
 
