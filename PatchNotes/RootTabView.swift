@@ -203,29 +203,46 @@ private struct SettingsSheetView: View {
 private struct AccountManagementView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var authManager: AuthManager
+    @Environment(\.dismiss) private var dismiss
 
     @State private var isSigningOut = false
     @State private var signOutErrorMessage: String?
+    @State private var showSubscriptionAlert = false
 
     var body: some View {
         Form {
-            Section("Profile") {
-                TextField("Display Name", text: $settings.displayName)
-                    .textInputAutocapitalization(.words)
-                TextField("Email", text: $settings.accountEmail)
-                    .keyboardType(.emailAddress)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
+            Section("Public Profile") {
+                NavigationLink {
+                    EditPublicProfileView()
+                } label: {
+                    Label("Edit Public Profile", systemImage: "person.text.rectangle")
+                }
+
+                HStack {
+                    Text("Display Name")
+                    Spacer()
+                    Text(settings.displayName)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text("Email")
+                    Spacer()
+                    Text(settings.accountEmail)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Account") {
-                Button("Manage Subscription") {}
+                Button("Manage Subscription") {
+                    showSubscriptionAlert = true
+                }
 
                 Button(isSigningOut ? "Signing Out..." : "Sign Out") {
                     signOut()
                 }
                 .disabled(isSigningOut)
-                    .foregroundStyle(.red)
+                .foregroundStyle(.red)
 
                 if let signOutErrorMessage {
                     Text(signOutErrorMessage)
@@ -235,6 +252,11 @@ private struct AccountManagementView: View {
             }
         }
         .navigationTitle("Account")
+        .alert("Manage Subscription", isPresented: $showSubscriptionAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("PN Pro subscription management is not wired yet. We can connect this to App Store subscriptions next.")
+        }
     }
 
     private func signOut() {
@@ -245,9 +267,101 @@ private struct AccountManagementView: View {
 
             do {
                 try await authManager.signOut()
+                dismiss()
             } catch {
                 signOutErrorMessage = error.localizedDescription
                 print("Sign out failed:", error)
+            }
+        }
+    }
+}
+
+private struct EditPublicProfileView: View {
+    @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var settings: AppSettings
+    @Environment(\.dismiss) private var dismiss
+
+    @StateObject private var profileGate = ProfileGateViewModel()
+
+    var body: some View {
+        Group {
+            switch profileGate.phase {
+            case .idle, .loading:
+                ZStack {
+                    AppBackground()
+                    ProgressView("Loading profile...")
+                        .tint(.white)
+                        .foregroundStyle(.white)
+                }
+                .preferredColorScheme(.dark)
+            case .error(let message):
+                ZStack {
+                    AppBackground()
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.title2)
+                        Text("Profile Load Error")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.white.opacity(0.75))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16)
+
+                        Button("Retry") {
+                            Task { await profileGate.refresh(session: authManager.session) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(20)
+                }
+                .preferredColorScheme(.dark)
+            case .needsCompletion(let profile), .ready(let profile):
+                ProfileOnboardingView(
+                    mode: .editProfile,
+                    profile: profile,
+                    fallbackEmail: authManager.session?.user.email,
+                    isSaving: profileGate.isSaving,
+                    errorMessage: profileGate.saveErrorMessage,
+                    successMessage: profileGate.saveSuccessMessage
+                ) { displayName, username in
+                    await profileGate.completeProfile(
+                        session: authManager.session,
+                        displayName: displayName,
+                        username: username
+                    )
+                }
+                .environmentObject(authManager)
+                .environmentObject(settings)
+            }
+        }
+        .navigationTitle("Edit Profile")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: authManager.session?.user.id) {
+            await profileGate.refresh(session: authManager.session)
+        }
+        .onChange(of: profileGate.currentProfile) { _, profile in
+            guard let profile else { return }
+
+            if let profileEmail = profile.email?.trimmingCharacters(in: .whitespacesAndNewlines), !profileEmail.isEmpty {
+                settings.accountEmail = profileEmail
+            }
+
+            let preferredName = profile.preferredDisplayName
+            if !preferredName.isEmpty {
+                settings.displayName = preferredName
+            }
+        }
+        .onChange(of: profileGate.saveSuccessMessage) { _, saveSuccessMessage in
+            guard saveSuccessMessage != nil else { return }
+
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                if profileGate.saveSuccessMessage != nil {
+                    dismiss()
+                }
             }
         }
     }

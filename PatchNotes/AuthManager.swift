@@ -35,6 +35,8 @@ final class AuthManager: ObservableObject {
 
     func signOut() async throws {
         try await client.auth.signOut()
+        // Optimistic local clear so root routing updates immediately even if the auth event stream lags.
+        session = nil
     }
 
     func resendSignUpConfirmation(email: String) async throws {

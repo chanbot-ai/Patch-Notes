@@ -27,6 +27,8 @@
 		A00000000000000000000044 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* AuthManager.swift */; };
 		A00000000000000000000045 /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000022 /* AuthView.swift */; };
 		A00000000000000000000046 /* ProfileOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* ProfileOnboardingView.swift */; };
+		A00000000000000000000047 /* PublicProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* PublicProfile.swift */; };
+		A00000000000000000000048 /* PublicProfileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* PublicProfileService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -50,6 +52,8 @@
 		A00000000000000000000021 /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
 		A00000000000000000000022 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
 		A00000000000000000000023 /* ProfileOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileOnboardingView.swift; sourceTree = "<group>"; };
+		A00000000000000000000024 /* PublicProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicProfile.swift; sourceTree = "<group>"; };
+		A00000000000000000000025 /* PublicProfileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicProfileService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,6 +93,7 @@
 				A0000000000000000000001C /* SupabaseManager.swift */,
 				A00000000000000000000021 /* AuthManager.swift */,
 				A0000000000000000000001E /* FeedService.swift */,
+				A00000000000000000000025 /* PublicProfileService.swift */,
 				A0000000000000000000001F /* FeedViewModel.swift */,
 				A00000000000000000000005 /* Views */,
 				A00000000000000000000006 /* Model */,
@@ -118,6 +123,7 @@
 				A00000000000000000000019 /* Models.swift */,
 				A0000000000000000000001A /* AppStore.swift */,
 				A0000000000000000000001D /* Post.swift */,
+				A00000000000000000000024 /* PublicProfile.swift */,
 			);
 			path = Model;
 			sourceTree = "<group>";
@@ -215,6 +221,8 @@
 				A00000000000000000000044 /* AuthManager.swift in Sources */,
 				A00000000000000000000045 /* AuthView.swift in Sources */,
 				A00000000000000000000046 /* ProfileOnboardingView.swift in Sources */,
+				A00000000000000000000047 /* PublicProfile.swift in Sources */,
+				A00000000000000000000048 /* PublicProfileService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

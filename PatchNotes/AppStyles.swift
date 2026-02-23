@@ -467,6 +467,27 @@ struct AppBackground: View {
     }
 }
 
+struct DarkAuthBackground: View {
+    var body: some View {
+        ZStack {
+            Color(.systemBackground)
+
+            Circle()
+                .fill(AppTheme.accent.opacity(0.16))
+                .frame(width: 300, height: 300)
+                .blur(radius: 90)
+                .offset(x: 150, y: -260)
+
+            Circle()
+                .fill(AppTheme.accentBlue.opacity(0.12))
+                .frame(width: 380, height: 380)
+                .blur(radius: 100)
+                .offset(x: -180, y: 340)
+        }
+        .ignoresSafeArea()
+    }
+}
+
 struct GlassCard<Content: View>: View {
     private let content: Content
 
@@ -490,6 +511,32 @@ struct GlassCard<Content: View>: View {
                     .stroke(Color.white.opacity(0.11), lineWidth: 1)
             }
             .shadow(color: .black.opacity(0.35), radius: 14, y: 7)
+    }
+}
+
+struct DarkAuthContainer<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack {
+            content
+        }
+        .padding(16)
+        .frame(maxWidth: 420)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.28), radius: 16, y: 8)
+        .padding(.horizontal, 2)
     }
 }
 

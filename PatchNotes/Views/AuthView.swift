@@ -16,13 +16,13 @@ struct AuthView: View {
 
     var body: some View {
         ZStack {
-            AppBackground()
+            DarkAuthBackground()
 
             ScrollView {
                 VStack(spacing: 22) {
                     authHeader
 
-                    GlassCard {
+                    DarkAuthContainer {
                         VStack(alignment: .leading, spacing: 16) {
                             SectionHeader(
                                 title: isSignUp ? "Create Account" : "Sign In",
@@ -143,6 +143,8 @@ struct AuthView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 36)
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
         }

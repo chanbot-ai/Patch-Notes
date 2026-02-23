@@ -22,6 +22,9 @@ struct AppUserProfileRecord: Identifiable, Decodable, Equatable {
             return displayName
         }
         if let username = username?.trimmingCharacters(in: .whitespacesAndNewlines), !username.isEmpty {
+            if UsernameRules.isPlaceholderUsername(username) {
+                return ""
+            }
             return username
         }
         return ""
@@ -48,15 +51,11 @@ private enum UsernameRules {
             if CharacterSet.lowercaseLetters.contains(scalar) || CharacterSet.decimalDigits.contains(scalar) {
                 return Character(scalar)
             }
-            if scalar == "_" || scalar == "-" || CharacterSet.whitespacesAndNewlines.contains(scalar) {
-                return "_"
-            }
-            return "_"
+            return " "
         }
 
         let collapsed = String(mapped)
-            .replacingOccurrences(of: "_+", with: "_", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
 
         guard !collapsed.isEmpty else { return nil }
         return String(collapsed.prefix(maxLength))
@@ -68,8 +67,7 @@ private enum UsernameRules {
 
     static func isValidAppUsername(_ value: String) -> Bool {
         guard (minLength...maxLength).contains(value.count) else { return false }
-        guard value.range(of: #"^[a-z0-9_]+$"#, options: .regularExpression) != nil else { return false }
-        return !value.hasPrefix("user_")
+        return value.range(of: #"^[a-z0-9]+$"#, options: .regularExpression) != nil
     }
 
     static func onboardingCandidate(displayName: String, username: String?) -> String? {
@@ -82,16 +80,17 @@ private enum UsernameRules {
         let explicitUsername = username?.trimmingCharacters(in: .whitespacesAndNewlines)
         let usingExplicitUsername = explicitUsername?.isEmpty == false
         let source = usingExplicitUsername ? explicitUsername : displayName
+
+        if let explicitUsername, explicitUsername.contains("_") {
+            return "Username cannot contain underscores. Use letters and numbers only."
+        }
+
         let candidate = normalizedCandidate(from: source)
 
         guard let candidate else {
             return usingExplicitUsername
-                ? "Username can only use letters, numbers, and underscores."
+                ? "Username can only use letters and numbers."
                 : "Add a username. We couldn't generate a valid one from your display name."
-        }
-
-        if candidate.hasPrefix("user_") {
-            return "Usernames starting with user_ are reserved. Choose a different username."
         }
 
         if candidate.count < minLength {
@@ -101,7 +100,7 @@ private enum UsernameRules {
         }
 
         if !isValidAppUsername(candidate) {
-            return "Username must be 3-32 lowercase letters, numbers, or underscores."
+            return "Username must be 3-32 lowercase letters or numbers."
         }
 
         return nil
@@ -199,6 +198,24 @@ private struct UserProfileService {
         return rows.first
     }
 
+    func isUsernameAvailable(
+        candidate: String,
+        excludingUserID: UUID,
+        accessToken: String
+    ) async throws -> Bool {
+        let response = try await authedClient(accessToken: accessToken)
+            .rpc(
+                "is_username_available",
+                params: UsernameAvailabilityParams(
+                    candidate: candidate,
+                    requester_user_id: excludingUserID
+                )
+            )
+            .execute()
+
+        return try decodeUsernameAvailability(from: response.data)
+    }
+
     func upsertProfile(
         userID: UUID,
         displayName: String,
@@ -237,7 +254,6 @@ private struct UserProfileService {
             )
         }
 
-        var capturedError: Error?
         let client = try authedClient(accessToken: accessToken)
 
         do {
@@ -255,50 +271,8 @@ private struct UserProfileService {
                 .execute()
             return
         } catch {
-            capturedError = error
+            throw mapProfileWriteError(error)
         }
-
-        do {
-            try await client
-                .from("users")
-                .upsert(
-                    DisplayNameOnlyUpsert(
-                        id: userID,
-                        display_name: trimmedDisplayName,
-                        onboarding_complete: true
-                    ),
-                    onConflict: "id"
-                )
-                .execute()
-            return
-        } catch {
-            capturedError = error
-        }
-
-        if !resolvedUsername.isEmpty {
-            do {
-                try await client
-                    .from("users")
-                    .upsert(
-                        UsernameOnlyUpsert(
-                            id: userID,
-                            username: resolvedUsername,
-                            onboarding_complete: true
-                        ),
-                        onConflict: "id"
-                    )
-                    .execute()
-                return
-            } catch {
-                capturedError = error
-            }
-        }
-
-        throw capturedError ?? NSError(
-            domain: "PatchNotes.Profile",
-            code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "Unable to save profile."]
-        )
     }
 
     private func authedClient(accessToken: String) throws -> SupabaseClient {
@@ -321,6 +295,11 @@ private struct UserProfileService {
         let onboarding_complete: Bool
     }
 
+    private struct UsernameAvailabilityParams: Encodable {
+        let candidate: String
+        let requester_user_id: UUID
+    }
+
     private struct DisplayNameOnlyUpsert: Encodable {
         let id: UUID
         let display_name: String
@@ -332,9 +311,124 @@ private struct UserProfileService {
         let username: String
         let onboarding_complete: Bool
     }
+
+    private func decodeUsernameAvailability(from data: Data) throws -> Bool {
+        let decoder = JSONDecoder()
+
+        if let value = try? decoder.decode(Bool.self, from: data) {
+            return value
+        }
+
+        if let object = try? decoder.decode([String: Bool].self, from: data),
+           let value = object.values.first {
+            return value
+        }
+
+        if let array = try? decoder.decode([Bool].self, from: data),
+           let value = array.first {
+            return value
+        }
+
+        if let array = try? decoder.decode([[String: Bool]].self, from: data),
+           let value = array.first?.values.first {
+            return value
+        }
+
+        throw NSError(
+            domain: "PatchNotes.Profile",
+            code: 9,
+            userInfo: [NSLocalizedDescriptionKey: "Unexpected username availability response."]
+        )
+    }
+
+    private func mapProfileWriteError(_ error: Error) -> Error {
+        let message = [
+            error.localizedDescription,
+            String(describing: error)
+        ]
+        .joined(separator: " | ")
+        .lowercased()
+
+        if message.contains("users_username_key") || message.contains("duplicate key value violates unique constraint") {
+            return NSError(
+                domain: "PatchNotes.Profile",
+                code: 6,
+                userInfo: [NSLocalizedDescriptionKey: "That username is already taken. Try another one."]
+            )
+        }
+
+        if message.contains("users_username_allowed_values_check") {
+            return NSError(
+                domain: "PatchNotes.Profile",
+                code: 7,
+                userInfo: [NSLocalizedDescriptionKey: "Username must be 3-32 lowercase letters or numbers."]
+            )
+        }
+
+        if message.contains("users_onboarding_complete_requires_real_username_check") {
+            return NSError(
+                domain: "PatchNotes.Profile",
+                code: 8,
+                userInfo: [NSLocalizedDescriptionKey: "Please choose a real username before continuing."]
+            )
+        }
+
+        return error
+    }
 }
 
 struct ProfileOnboardingView: View {
+    enum Mode {
+        case onboarding
+        case editProfile
+
+        var title: String {
+            switch self {
+            case .onboarding: return "Complete Profile"
+            case .editProfile: return "Edit Profile"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .onboarding:
+                return "Add a display name before entering the app."
+            case .editProfile:
+                return "Update your public profile details."
+            }
+        }
+
+        var primaryButtonTitle: String {
+            switch self {
+            case .onboarding: return "Continue to Patch Notes"
+            case .editProfile: return "Save Profile"
+            }
+        }
+
+        var successButtonTitle: String {
+            switch self {
+            case .onboarding: return "Profile Saved"
+            case .editProfile: return "Saved"
+            }
+        }
+
+        var showsSignOut: Bool {
+            switch self {
+            case .onboarding: return true
+            case .editProfile: return false
+            }
+        }
+    }
+
+    private enum UsernameAvailabilityState: Equatable {
+        case idle
+        case checking(String)
+        case available(String)
+        case taken(String)
+        case error(String)
+    }
+
+    let mode: Mode
     let profile: AppUserProfileRecord?
     let fallbackEmail: String?
     let isSaving: Bool
@@ -348,22 +442,41 @@ struct ProfileOnboardingView: View {
     @State private var displayName = ""
     @State private var username = ""
     @State private var hasSeeded = false
+    @State private var usernameAvailability: UsernameAvailabilityState = .idle
+
+    init(
+        mode: Mode = .onboarding,
+        profile: AppUserProfileRecord?,
+        fallbackEmail: String?,
+        isSaving: Bool,
+        errorMessage: String?,
+        successMessage: String?,
+        onSave: @escaping @MainActor (_ displayName: String, _ username: String?) async -> Void
+    ) {
+        self.mode = mode
+        self.profile = profile
+        self.fallbackEmail = fallbackEmail
+        self.isSaving = isSaving
+        self.errorMessage = errorMessage
+        self.successMessage = successMessage
+        self.onSave = onSave
+    }
 
     var body: some View {
         ZStack {
-            AppBackground()
+            DarkAuthBackground()
 
             ScrollView {
                 VStack(spacing: 18) {
-                    GlassCard {
+                    DarkAuthContainer {
                         VStack(alignment: .leading, spacing: 16) {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("Complete Profile")
+                                Text(mode.title)
                                     .font(.title2.weight(.bold))
                                     .fontDesign(.rounded)
                                     .foregroundStyle(.white)
 
-                                Text("Add a display name before entering the app. Your `public.users` row is used as the source of truth.")
+                                Text(mode.subtitle)
                                     .font(.subheadline)
                                     .foregroundStyle(.white.opacity(0.70))
                             }
@@ -393,7 +506,7 @@ struct ProfileOnboardingView: View {
                             )
 
                             formField(
-                                title: "Username (optional)",
+                                title: "Username",
                                 icon: "at",
                                 text: $username,
                                 prompt: "Used for mentions and URLs"
@@ -420,11 +533,13 @@ struct ProfileOnboardingView: View {
                                 }
                                 .padding(.horizontal, 2)
                             } else {
-                                Text("Username must be 3-32 lowercase letters, numbers, or underscores. Prefix user_ is reserved.")
+                                Text("Username must be 3-32 lowercase letters or numbers. Underscores are not allowed.")
                                     .font(.footnote)
                                     .foregroundStyle(.white.opacity(0.56))
                                     .padding(.horizontal, 2)
                             }
+
+                            usernameAvailabilityView
 
                             if let errorMessage {
                                 HStack(alignment: .top, spacing: 8) {
@@ -473,7 +588,7 @@ struct ProfileOnboardingView: View {
                                     Text(
                                         isSaving
                                             ? "Saving..."
-                                            : (successMessage != nil ? "Profile Saved" : "Continue to Patch Notes")
+                                            : (successMessage != nil ? mode.successButtonTitle : mode.primaryButtonTitle)
                                     )
                                         .font(.headline.weight(.semibold))
                                 }
@@ -489,19 +604,21 @@ struct ProfileOnboardingView: View {
                                 )
                             }
                             .buttonStyle(.plain)
-                            .disabled(isSaving || successMessage != nil || trimmedDisplayName.isEmpty || usernameValidationMessage != nil)
-                            .opacity((isSaving || successMessage != nil || trimmedDisplayName.isEmpty || usernameValidationMessage != nil) ? 0.6 : 1)
+                            .disabled(isSaveButtonDisabled)
+                            .opacity(isSaveButtonDisabled ? 0.6 : 1)
 
-                            Button(role: .destructive) {
-                                signOut()
-                            } label: {
-                                Text("Sign Out")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(.white.opacity(0.75))
-                                    .frame(maxWidth: .infinity)
+                            if mode.showsSignOut {
+                                Button(role: .destructive) {
+                                    signOut()
+                                } label: {
+                                    Text("Sign Out")
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(.white.opacity(0.75))
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isSaving)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(isSaving)
                         }
                     }
                 }
@@ -515,6 +632,9 @@ struct ProfileOnboardingView: View {
         }
         .onChange(of: profile?.id) { _, _ in
             seedFieldsIfNeeded(force: true)
+        }
+        .task(id: usernameAvailabilityLookupKey) {
+            await refreshUsernameAvailability()
         }
     }
 
@@ -557,6 +677,99 @@ struct ProfileOnboardingView: View {
         return candidate
     }
 
+    private var usernameAvailabilityCandidate: String? {
+        guard usernameValidationMessage == nil else { return nil }
+        guard !trimmedDisplayName.isEmpty else { return nil }
+        return UsernameRules.onboardingCandidate(
+            displayName: trimmedDisplayName,
+            username: trimmedUsername.isEmpty ? nil : trimmedUsername
+        )
+    }
+
+    private var usernameAvailabilityLookupKey: String {
+        let userID = authManager.session?.user.id.uuidString ?? "no-session"
+        let candidate = usernameAvailabilityCandidate ?? "no-candidate"
+        return "\(mode)|\(userID)|\(candidate)"
+    }
+
+    private var isSaveButtonDisabled: Bool {
+        if isSaving || successMessage != nil || trimmedDisplayName.isEmpty || usernameValidationMessage != nil {
+            return true
+        }
+
+        if case .checking = effectiveUsernameAvailability {
+            return true
+        }
+        if case .taken = effectiveUsernameAvailability {
+            return true
+        }
+
+        return false
+    }
+
+    @ViewBuilder
+    private var usernameAvailabilityView: some View {
+        switch effectiveUsernameAvailability {
+        case .idle:
+            EmptyView()
+        case .checking(let candidate):
+            HStack(alignment: .top, spacing: 8) {
+                ProgressView().tint(.white.opacity(0.85))
+                    .scaleEffect(0.8)
+                Text("Checking @\(candidate)…")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+            .padding(.horizontal, 2)
+        case .available(let candidate):
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("@\(candidate) is available")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.82))
+            }
+            .padding(.horizontal, 2)
+        case .taken(let candidate):
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "xmark.octagon.fill")
+                    .foregroundStyle(.red)
+                Text("@\(candidate) is already taken")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.88))
+            }
+            .padding(.horizontal, 2)
+        case .error(let message):
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "wifi.exclamationmark")
+                    .foregroundStyle(.orange)
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.80))
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
+    private var effectiveUsernameAvailability: UsernameAvailabilityState {
+        guard let candidate = usernameAvailabilityCandidate else { return .idle }
+
+        switch usernameAvailability {
+        case .idle:
+            return .idle
+        case .checking(let stateCandidate) where stateCandidate == candidate:
+            return usernameAvailability
+        case .available(let stateCandidate) where stateCandidate == candidate:
+            return usernameAvailability
+        case .taken(let stateCandidate) where stateCandidate == candidate:
+            return usernameAvailability
+        case .error:
+            return usernameAvailability
+        default:
+            return .idle
+        }
+    }
+
     private func formField(
         title: String,
         icon: String,
@@ -597,7 +810,8 @@ struct ProfileOnboardingView: View {
         if let profile {
             if displayName.isEmpty || force {
                 let safeProfileUsername = profile.username.flatMap { UsernameRules.isPlaceholderUsername($0) ? nil : $0 }
-                displayName = profile.display_name ?? safeProfileUsername ?? settings.displayName
+                let safeSettingsDisplayName = UsernameRules.isPlaceholderUsername(settings.displayName) ? "" : settings.displayName
+                displayName = profile.display_name ?? safeProfileUsername ?? safeSettingsDisplayName
             }
             if username.isEmpty || force {
                 if let profileUsername = profile.username, !UsernameRules.isPlaceholderUsername(profileUsername) {
@@ -608,7 +822,9 @@ struct ProfileOnboardingView: View {
             }
         } else {
             if displayName.isEmpty || force {
-                displayName = settings.displayName == "Chan" ? "" : settings.displayName
+                let cachedName = settings.displayName
+                let shouldHideCachedPlaceholder = UsernameRules.isPlaceholderUsername(cachedName)
+                displayName = (settings.displayName == "Chan" || shouldHideCachedPlaceholder) ? "" : settings.displayName
             }
         }
 
@@ -617,16 +833,84 @@ struct ProfileOnboardingView: View {
 
     private func save() {
         guard usernameValidationMessage == nil else { return }
+        guard let session = authManager.session else { return }
 
+        let submittedUsername: String?
         if let generatedUsernamePreview, !trimmedUsername.isEmpty {
             username = generatedUsernamePreview
+            submittedUsername = generatedUsernamePreview
+        } else if trimmedUsername.isEmpty {
+            submittedUsername = nil
+        } else {
+            submittedUsername = trimmedUsername
         }
 
         Task {
+            if let candidate = UsernameRules.onboardingCandidate(
+                displayName: trimmedDisplayName,
+                username: submittedUsername
+            ) {
+                usernameAvailability = .checking(candidate)
+
+                do {
+                    let isAvailable = try await UserProfileService().isUsernameAvailable(
+                        candidate: candidate,
+                        excludingUserID: session.user.id,
+                        accessToken: session.accessToken
+                    )
+                    usernameAvailability = isAvailable ? .available(candidate) : .taken(candidate)
+                    guard isAvailable else { return }
+                } catch {
+                    usernameAvailability = .error("Couldn’t check username availability right now.")
+                    return
+                }
+            }
+
             await onSave(
                 trimmedDisplayName,
-                trimmedUsername.isEmpty ? nil : trimmedUsername
+                submittedUsername
             )
+        }
+    }
+
+    private func refreshUsernameAvailability() async {
+        guard let session = authManager.session else {
+            usernameAvailability = .idle
+            return
+        }
+
+        guard let candidate = usernameAvailabilityCandidate else {
+            usernameAvailability = .idle
+            return
+        }
+
+        if let currentUsername = profile?.username, currentUsername == candidate {
+            usernameAvailability = .available(candidate)
+            return
+        }
+
+        usernameAvailability = .checking(candidate)
+
+        do {
+            try await Task.sleep(nanoseconds: 300_000_000)
+        } catch {
+            return
+        }
+
+        guard candidate == usernameAvailabilityCandidate else { return }
+
+        do {
+            let isAvailable = try await UserProfileService().isUsernameAvailable(
+                candidate: candidate,
+                excludingUserID: session.user.id,
+                accessToken: session.accessToken
+            )
+
+            guard candidate == usernameAvailabilityCandidate else { return }
+            usernameAvailability = isAvailable ? .available(candidate) : .taken(candidate)
+        } catch {
+            guard candidate == usernameAvailabilityCandidate else { return }
+            usernameAvailability = .error("Couldn’t check username availability right now.")
         }
     }
 
