@@ -33,6 +33,81 @@ struct AppUserProfileRecord: Identifiable, Decodable, Equatable {
     }
 }
 
+private enum UsernameRules {
+    static let minLength = 3
+    static let maxLength = 32
+
+    static func normalizedCandidate(from rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let lowered = trimmed.lowercased()
+        let mapped = lowered.unicodeScalars.map { scalar -> Character in
+            if CharacterSet.lowercaseLetters.contains(scalar) || CharacterSet.decimalDigits.contains(scalar) {
+                return Character(scalar)
+            }
+            if scalar == "_" || scalar == "-" || CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                return "_"
+            }
+            return "_"
+        }
+
+        let collapsed = String(mapped)
+            .replacingOccurrences(of: "_+", with: "_", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+
+        guard !collapsed.isEmpty else { return nil }
+        return String(collapsed.prefix(maxLength))
+    }
+
+    static func isPlaceholderUsername(_ value: String) -> Bool {
+        value.range(of: #"^user_[0-9a-f]{32}$"#, options: .regularExpression) != nil
+    }
+
+    static func isValidAppUsername(_ value: String) -> Bool {
+        guard (minLength...maxLength).contains(value.count) else { return false }
+        guard value.range(of: #"^[a-z0-9_]+$"#, options: .regularExpression) != nil else { return false }
+        return !value.hasPrefix("user_")
+    }
+
+    static func onboardingCandidate(displayName: String, username: String?) -> String? {
+        let explicitUsername = username?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = (explicitUsername?.isEmpty == false) ? explicitUsername : displayName
+        return normalizedCandidate(from: source)
+    }
+
+    static func onboardingValidationMessage(displayName: String, username: String?) -> String? {
+        let explicitUsername = username?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let usingExplicitUsername = explicitUsername?.isEmpty == false
+        let source = usingExplicitUsername ? explicitUsername : displayName
+        let candidate = normalizedCandidate(from: source)
+
+        guard let candidate else {
+            return usingExplicitUsername
+                ? "Username can only use letters, numbers, and underscores."
+                : "Add a username. We couldn't generate a valid one from your display name."
+        }
+
+        if candidate.hasPrefix("user_") {
+            return "Usernames starting with user_ are reserved. Choose a different username."
+        }
+
+        if candidate.count < minLength {
+            return usingExplicitUsername
+                ? "Username must be 3-32 characters."
+                : "Add a username (3-32 characters). Your display name generates a username that is too short."
+        }
+
+        if !isValidAppUsername(candidate) {
+            return "Username must be 3-32 lowercase letters, numbers, or underscores."
+        }
+
+        return nil
+    }
+}
+
 @MainActor
 final class ProfileGateViewModel: ObservableObject {
     enum Phase {
@@ -131,13 +206,34 @@ private struct UserProfileService {
         accessToken: String
     ) async throws {
         let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedUsername = normalizedUsername(from: username ?? displayName)
 
         guard !trimmedDisplayName.isEmpty else {
             throw NSError(
                 domain: "PatchNotes.Profile",
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "Display name is required."]
+            )
+        }
+
+        if let validationMessage = UsernameRules.onboardingValidationMessage(
+            displayName: trimmedDisplayName,
+            username: username
+        ) {
+            throw NSError(
+                domain: "PatchNotes.Profile",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: validationMessage]
+            )
+        }
+
+        guard let resolvedUsername = UsernameRules.onboardingCandidate(
+            displayName: trimmedDisplayName,
+            username: username
+        ) else {
+            throw NSError(
+                domain: "PatchNotes.Profile",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Please choose a valid username before continuing."]
             )
         }
 
@@ -179,7 +275,7 @@ private struct UserProfileService {
             capturedError = error
         }
 
-        if let resolvedUsername, !resolvedUsername.isEmpty {
+        if !resolvedUsername.isEmpty {
             do {
                 try await client
                     .from("users")
@@ -203,29 +299,6 @@ private struct UserProfileService {
             code: 2,
             userInfo: [NSLocalizedDescriptionKey: "Unable to save profile."]
         )
-    }
-
-    private func normalizedUsername(from rawValue: String?) -> String? {
-        guard let rawValue else { return nil }
-
-        let lowered = rawValue
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-
-        guard !lowered.isEmpty else { return nil }
-
-        let allowed = lowered.unicodeScalars.map { scalar -> Character in
-            if CharacterSet.alphanumerics.contains(scalar) { return Character(scalar) }
-            if scalar == "-" || scalar == "_" { return Character(scalar) }
-            if CharacterSet.whitespaces.contains(scalar) { return "-" }
-            return "-"
-        }
-
-        let collapsed = String(allowed)
-            .replacingOccurrences(of: "--+", with: "-", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
-
-        return collapsed.isEmpty ? nil : String(collapsed.prefix(24))
     }
 
     private func authedClient(accessToken: String) throws -> SupabaseClient {
@@ -328,6 +401,31 @@ struct ProfileOnboardingView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
 
+                            if let usernameValidationMessage {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "exclamationmark.circle.fill")
+                                        .foregroundStyle(.orange)
+                                    Text(usernameValidationMessage)
+                                        .font(.footnote)
+                                        .foregroundStyle(.white.opacity(0.85))
+                                }
+                                .padding(.horizontal, 2)
+                            } else if let generatedUsernamePreview {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "arrow.triangle.swap")
+                                        .foregroundStyle(AppTheme.accentBlue.opacity(0.95))
+                                    Text(trimmedUsername.isEmpty ? "Username will be set to @\(generatedUsernamePreview)." : "Will save as @\(generatedUsernamePreview).")
+                                        .font(.footnote)
+                                        .foregroundStyle(.white.opacity(0.70))
+                                }
+                                .padding(.horizontal, 2)
+                            } else {
+                                Text("Username must be 3-32 lowercase letters, numbers, or underscores. Prefix user_ is reserved.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.white.opacity(0.56))
+                                    .padding(.horizontal, 2)
+                            }
+
                             if let errorMessage {
                                 HStack(alignment: .top, spacing: 8) {
                                     Image(systemName: "exclamationmark.triangle.fill")
@@ -391,8 +489,8 @@ struct ProfileOnboardingView: View {
                                 )
                             }
                             .buttonStyle(.plain)
-                            .disabled(isSaving || successMessage != nil || trimmedDisplayName.isEmpty)
-                            .opacity((isSaving || successMessage != nil || trimmedDisplayName.isEmpty) ? 0.6 : 1)
+                            .disabled(isSaving || successMessage != nil || trimmedDisplayName.isEmpty || usernameValidationMessage != nil)
+                            .opacity((isSaving || successMessage != nil || trimmedDisplayName.isEmpty || usernameValidationMessage != nil) ? 0.6 : 1)
 
                             Button(role: .destructive) {
                                 signOut()
@@ -426,6 +524,37 @@ struct ProfileOnboardingView: View {
 
     private var trimmedDisplayName: String {
         displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedUsername: String {
+        username.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var usernameValidationMessage: String? {
+        guard !trimmedDisplayName.isEmpty else { return nil }
+        return UsernameRules.onboardingValidationMessage(
+            displayName: trimmedDisplayName,
+            username: trimmedUsername.isEmpty ? nil : trimmedUsername
+        )
+    }
+
+    private var generatedUsernamePreview: String? {
+        guard !trimmedDisplayName.isEmpty else { return nil }
+        guard usernameValidationMessage == nil else { return nil }
+
+        let explicitUsername = trimmedUsername.isEmpty ? nil : trimmedUsername
+        guard let candidate = UsernameRules.onboardingCandidate(
+            displayName: trimmedDisplayName,
+            username: explicitUsername
+        ) else {
+            return nil
+        }
+
+        if let explicitUsername, explicitUsername == candidate {
+            return nil
+        }
+
+        return candidate
     }
 
     private func formField(
@@ -467,10 +596,15 @@ struct ProfileOnboardingView: View {
 
         if let profile {
             if displayName.isEmpty || force {
-                displayName = profile.display_name ?? profile.username ?? settings.displayName
+                let safeProfileUsername = profile.username.flatMap { UsernameRules.isPlaceholderUsername($0) ? nil : $0 }
+                displayName = profile.display_name ?? safeProfileUsername ?? settings.displayName
             }
             if username.isEmpty || force {
-                username = profile.username ?? ""
+                if let profileUsername = profile.username, !UsernameRules.isPlaceholderUsername(profileUsername) {
+                    username = profileUsername
+                } else {
+                    username = ""
+                }
             }
         } else {
             if displayName.isEmpty || force {
@@ -482,11 +616,16 @@ struct ProfileOnboardingView: View {
     }
 
     private func save() {
-        let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard usernameValidationMessage == nil else { return }
+
+        if let generatedUsernamePreview, !trimmedUsername.isEmpty {
+            username = generatedUsernamePreview
+        }
+
         Task {
             await onSave(
                 trimmedDisplayName,
-                normalizedUsername.isEmpty ? nil : normalizedUsername
+                trimmedUsername.isEmpty ? nil : trimmedUsername
             )
         }
     }
