@@ -35,6 +35,7 @@ Stop and wait for human input when:
 - Secrets/credentials are missing or invalid
 - A migration risks data loss
 - The fix requires design direction rather than engineering execution
+- Estimated weekly rate-limit remaining drops below 30%
 
 ## SQL / Supabase Rules
 
@@ -52,4 +53,3 @@ Update `ASYNC_AGENT_HANDOFF.md` after each milestone with:
 - Migration IDs applied (if any)
 - Verification performed
 - Open risks / next recommended step
-
