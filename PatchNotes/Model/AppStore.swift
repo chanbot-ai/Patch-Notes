@@ -40,6 +40,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var followingPosts: [Post]
     @Published private(set) var followingFeedIsLoading: Bool
     @Published private(set) var followingFeedErrorMessage: String?
+    @Published private(set) var gameCatalogByID: [Game.ID: Game]
     @Published private(set) var ownedGames: [Game]
     @Published private(set) var upcomingReleases: [Game]
     @Published private(set) var favoriteReleaseIDs: Set<Game.ID>
@@ -100,6 +101,7 @@ final class AppStore: ObservableObject {
         self.followingPosts = []
         self.followingFeedIsLoading = false
         self.followingFeedErrorMessage = nil
+        self.gameCatalogByID = [:]
         self.ownedGames = []
         self.upcomingReleases = []
         self.favoriteReleaseIDs = []
@@ -130,6 +132,14 @@ final class AppStore: ObservableObject {
         return candidates.filter { game in
             seen.insert(game.id).inserted
         }
+    }
+
+    func game(for gameID: Game.ID?) -> Game? {
+        guard let gameID else { return nil }
+        if let game = gameCatalogByID[gameID] {
+            return game
+        }
+        return socialGames.first(where: { $0.id == gameID })
     }
 
     func toggleFavorite(_ game: Game) {
@@ -574,6 +584,7 @@ final class AppStore: ObservableObject {
         do {
             let fetchedPosts = try await feedService.fetchHotFeed()
             await refreshPublicProfiles(for: fetchedPosts.compactMap(\.authorID))
+            await hydrateGameCatalog(for: fetchedPosts)
             applyHotFeedPosts(fetchedPosts, animated: false)
             let postIDs = fetchedPosts.map(\.id)
             Task { @MainActor [weak self] in
@@ -610,6 +621,7 @@ final class AppStore: ObservableObject {
         do {
             let fetched = try await feedService.fetchFollowingFeed(accessToken: accessToken)
             await refreshPublicProfiles(for: fetched.compactMap(\.authorID))
+            await hydrateGameCatalog(for: fetched)
             followingPosts = fetched.sorted(by: Self.sortPosts)
             let postIDs = fetched.map(\.id)
             await refreshReactionState(for: postIDs)
@@ -747,6 +759,7 @@ final class AppStore: ObservableObject {
             if let authorID = updated.authorID {
                 await refreshPublicProfiles(for: [authorID])
             }
+            await hydrateGameCatalog(for: [updated])
         } catch {
             print("Failed to refresh post:", error)
         }
@@ -1087,6 +1100,29 @@ final class AppStore: ObservableObject {
             next[profile.id] = profile
         }
         publicProfilesByID = next
+    }
+
+    private func hydrateGameCatalog(for posts: [Post]) async {
+        let gameIDs = Set(posts.compactMap(\.gameID))
+        guard !gameIDs.isEmpty else { return }
+        let missing = gameIDs.filter { gameCatalogByID[$0] == nil }
+        guard !missing.isEmpty else { return }
+
+        do {
+            let games = try await feedService.fetchGameCatalog(ids: Array(missing))
+            cacheGameCatalog(games)
+        } catch {
+            print("Failed to load game catalog:", error)
+        }
+    }
+
+    private func cacheGameCatalog(_ games: [Game]) {
+        guard !games.isEmpty else { return }
+        var next = gameCatalogByID
+        for game in games {
+            next[game.id] = game
+        }
+        gameCatalogByID = next
     }
 
     private func fetchCommentsPage(

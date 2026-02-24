@@ -94,6 +94,7 @@ struct FeedView: View {
                 FeedPostRow(
                     post: post,
                     authorProfile: store.publicProfile(for: post.authorID),
+                    linkedGame: store.game(for: post.gameID),
                     reactionCountOverride: store.reactionTotal(for: post),
                     reactionTypes: store.reactionTypes,
                     reactionCounts: store.reactionCountsByPost[post.id] ?? [],
@@ -207,6 +208,7 @@ struct FeedView: View {
 private struct FeedPostRow: View {
     let post: Post
     let authorProfile: PublicProfile?
+    let linkedGame: Game?
     let reactionCountOverride: Int
     let reactionTypes: [ReactionType]
     let reactionCounts: [PostReactionCount]
@@ -231,6 +233,15 @@ private struct FeedPostRow: View {
                     .font(.headline)
                     .foregroundStyle(.white.opacity(0.92))
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let linkedGame {
+                NavigationLink {
+                    GameReleaseDetailView(game: linkedGame)
+                } label: {
+                    GameContextChip(game: linkedGame)
+                }
+                .buttonStyle(.plain)
             }
 
             if let body = post.body?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty {
@@ -332,6 +343,38 @@ private struct FeedPostRow: View {
     }
 }
 
+private struct GameContextChip: View {
+    let game: Game
+
+    var body: some View {
+        HStack(spacing: 8) {
+            RemoteMediaImage(primaryURL: game.coverImageURL, fallbackURL: MediaFallback.gameCover)
+                .frame(width: 22, height: 30)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                }
+
+            Text(game.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.white.opacity(0.08), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        }
+    }
+}
+
 private struct PostCommentsDetailView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -371,6 +414,10 @@ private struct PostCommentsDetailView: View {
             get: { store.commentSortMode(for: post.id) },
             set: { store.setCommentSort($0, for: post.id) }
         )
+    }
+
+    private var linkedGame: Game? {
+        store.game(for: post.gameID)
     }
 
     var body: some View {
@@ -566,6 +613,14 @@ private struct PostCommentsDetailView: View {
                 Text(title)
                     .font(.headline)
                     .foregroundStyle(.white)
+            }
+            if let linkedGame {
+                NavigationLink {
+                    GameReleaseDetailView(game: linkedGame)
+                } label: {
+                    GameContextChip(game: linkedGame)
+                }
+                .buttonStyle(.plain)
             }
             if let body = post.body?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty {
                 Text(body)

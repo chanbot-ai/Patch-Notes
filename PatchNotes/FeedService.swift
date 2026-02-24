@@ -54,6 +54,14 @@ final class FeedService {
         let genre: String?
     }
 
+    private struct GameCatalogRow: Decodable {
+        let id: UUID
+        let title: String
+        let cover_image_url: String?
+        let release_date: String?
+        let genre: String?
+    }
+
     private struct NotificationReadUpdatePayload: Encodable {
         let read: Bool
     }
@@ -288,6 +296,35 @@ final class FeedService {
                 return
             }
             throw error
+        }
+    }
+
+    func fetchGameCatalog(ids: [UUID]) async throws -> [Game] {
+        let uniqueIDs = Array(Set(ids))
+        guard !uniqueIDs.isEmpty else { return [] }
+
+        let response = try await client
+            .from("games")
+            .select("id,title,cover_image_url,release_date,genre")
+            .in("id", values: uniqueIDs.map(\.uuidString))
+            .execute()
+
+        let rows = try JSONDecoder().decode([GameCatalogRow].self, from: response.data)
+        return rows.map { row in
+            let releaseDate = row.release_date.flatMap { Self.sqlDateFormatter.date(from: $0) } ?? Date()
+            let coverURL = row.cover_image_url.flatMap { URL(string: $0) }
+            return Game(
+                id: row.id,
+                title: row.title,
+                publisher: "Unknown Studio",
+                genre: row.genre ?? "Unknown Genre",
+                releaseDate: releaseDate,
+                similarTitles: [],
+                reviewScores: [],
+                isOwned: false,
+                coverImageURL: coverURL,
+                screenshotURLs: []
+            )
         }
     }
 

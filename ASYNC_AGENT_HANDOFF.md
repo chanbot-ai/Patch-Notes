@@ -6,19 +6,18 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Roadmap tranche 5 (public profile hydration for posts/comments)
+- Last milestone: Roadmap tranche 6 (linked game chips for feed + detail)
 
 ## Latest Milestone
 
 ### Summary
 
-- Added batched public profile hydration for post/comment authors and reused it for notifications.
-- Wired author display in feed rows, comment cards, and post detail headers.
-- Extended Post model to decode author/game IDs from feed views.
+- Added batched game catalog hydration for post-linked game IDs.
+- Displayed linked game chips in feed rows and post detail headers with navigation to game detail.
+- Reused the existing game detail surface for feed-linked game context.
 
 ### Files Touched
 
-- `PatchNotes/Model/Post.swift`
 - `PatchNotes/FeedService.swift`
 - `PatchNotes/Model/AppStore.swift`
 - `PatchNotes/Views/FeedView.swift`
@@ -30,7 +29,7 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 ### Verification
 
-- `xcodebuild -scheme PatchNotes -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build` failed (CoreSimulator connection + sandboxed cache access prevented package resolution).
+- `xcodebuild -scheme PatchNotes -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build` failed (CoreSimulator connection invalid; SwiftPM cache access denied).
 
 ### Open Risks / Notes
 
@@ -39,6 +38,6 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 ## Next Recommended Action
 
 - Continue open-ended roadmap execution (priority order):
-  1. Feed rows/post detail: show linked game chips and jump-to-game context
-  2. Notification inbox polish (read/unread filters, grouped by recency)
-  3. Release Calendar polish tied to follow/watch state and social activity
+  1. Notification inbox polish (read/unread filters, grouped by recency)
+  2. Release Calendar polish tied to follow/watch state and social activity
+  3. Social composer/media enrichment (media uploads + richer post types)
