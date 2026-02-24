@@ -45,3 +45,28 @@ struct Comment: Identifiable, Decodable, Equatable {
     var userID: UUID { user_id }
     var parentCommentID: UUID? { parent_comment_id }
 }
+
+enum CommentSortMode: String, CaseIterable, Identifiable {
+    case top
+    case new
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .top: return "Top"
+        case .new: return "New"
+        }
+    }
+}
+
+struct CommentReactionCount: Identifiable, Decodable, Equatable {
+    let comment_id: UUID
+    let reaction_type_id: UUID
+    var count: Int
+
+    var id: UUID { reaction_type_id }
+
+    var commentID: UUID { comment_id }
+    var reactionTypeID: UUID { reaction_type_id }
+}

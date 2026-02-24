@@ -2,16 +2,64 @@ import SwiftUI
 import Foundation
 import Supabase
 
+private enum FeedScope: String, CaseIterable, Identifiable {
+    case hot
+    case following
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .hot: return "Hot"
+        case .following: return "Following"
+        }
+    }
+}
+
 struct FeedView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var store: AppStore
 
     @State private var showingComposer = false
     @State private var selectedCommentsPost: Post?
+    @State private var feedScope: FeedScope = .hot
+
+    private var activePosts: [Post] {
+        switch feedScope {
+        case .hot: return store.posts
+        case .following: return store.followingPosts
+        }
+    }
+
+    private var activeFeedIsLoading: Bool {
+        switch feedScope {
+        case .hot: return store.feedIsLoading
+        case .following: return store.followingFeedIsLoading
+        }
+    }
+
+    private var activeFeedErrorMessage: String? {
+        switch feedScope {
+        case .hot: return store.feedErrorMessage
+        case .following: return store.followingFeedErrorMessage
+        }
+    }
 
     var body: some View {
         List {
-            if store.feedIsLoading && store.posts.isEmpty {
+            Section {
+                Picker("Feed", selection: $feedScope) {
+                    ForEach(FeedScope.allCases) { scope in
+                        Text(scope.title).tag(scope)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 8, trailing: 12))
+            .listRowBackground(Color.clear)
+
+            if activeFeedIsLoading && activePosts.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Loading feed...")
@@ -19,7 +67,7 @@ struct FeedView: View {
                 }
             }
 
-            if let errorMessage = store.feedErrorMessage {
+            if let errorMessage = activeFeedErrorMessage {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Feed Error")
                         .font(.headline)
@@ -31,17 +79,17 @@ struct FeedView: View {
                 .foregroundStyle(.red)
             }
 
-            if !store.feedIsLoading && store.posts.isEmpty && store.feedErrorMessage == nil {
+            if !activeFeedIsLoading && activePosts.isEmpty && activeFeedErrorMessage == nil {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("No posts yet")
                         .font(.headline)
-                    Text("Create the first post from the compose button.")
+                    Text(feedScope == .hot ? "Create the first post from the compose button." : "Follow some games to populate your following feed.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            ForEach(store.posts) { post in
+            ForEach(activePosts) { post in
                 FeedPostRow(
                     post: post,
                     reactionCountOverride: store.reactionTotal(for: post),
@@ -92,7 +140,17 @@ struct FeedView: View {
             .presentationDragIndicator(.visible)
         }
         .refreshable {
-            await store.refreshHotFeed()
+            switch feedScope {
+            case .hot:
+                await store.refreshHotFeed()
+            case .following:
+                await store.refreshFollowingFeed()
+            }
+        }
+        .onChange(of: feedScope) { _, newValue in
+            if newValue == .following, store.followingPosts.isEmpty, !store.followingFeedIsLoading {
+                store.loadFollowingFeed()
+            }
         }
         .overlay(alignment: .top) {
             if let reactionErrorMessage = store.reactionErrorMessage {
@@ -103,6 +161,11 @@ struct FeedView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: store.reactionErrorMessage)
+        .task {
+            if feedScope == .following, store.followingPosts.isEmpty, !store.followingFeedIsLoading {
+                store.loadFollowingFeed()
+            }
+        }
     }
 }
 
@@ -227,6 +290,7 @@ private struct PostCommentsDetailView: View {
 
     @State private var draftComment = ""
     @State private var replyingToRootCommentID: UUID?
+    @State private var expandedReplyParentIDs: Set<UUID> = []
 
     private var comments: [Comment] {
         store.comments(for: post.id)
@@ -250,6 +314,13 @@ private struct PostCommentsDetailView: View {
 
     private var canSubmit: Bool {
         !draftComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var commentSortSelection: Binding<CommentSortMode> {
+        Binding(
+            get: { store.commentSortMode(for: post.id) },
+            set: { store.setCommentSort($0, for: post.id) }
+        )
     }
 
     var body: some View {
@@ -300,22 +371,76 @@ private struct PostCommentsDetailView: View {
                 }
 
                 ForEach(rootComments) { comment in
+                    let replies = repliesByParent[comment.id] ?? []
+                    let repliesExpanded = expandedReplyParentIDs.contains(comment.id)
                     VStack(alignment: .leading, spacing: 10) {
                         CommentRowCard(
                             comment: comment,
                             isReply: false,
+                            reactionTypes: store.reactionTypes,
+                            reactionCounts: store.commentReactionCounts(for: comment.id),
+                            selectedReactionTypeIDs: store.viewerCommentReactionTypeIDsByComment[comment.id] ?? [],
+                            reactionTotalOverride: store.commentReactionTotal(for: comment),
+                            onReact: { reactionTypeID in
+                                store.reactToComment(comment.id, reactionTypeId: reactionTypeID)
+                            },
                             onReply: {
                                 replyingToRootCommentID = comment.id
                             }
                         )
 
-                        if let replies = repliesByParent[comment.id], !replies.isEmpty {
-                            VStack(spacing: 10) {
-                                ForEach(replies) { reply in
-                                    CommentRowCard(comment: reply, isReply: true, onReply: nil)
+                        if !replies.isEmpty {
+                            HStack(spacing: 8) {
+                                Button {
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                        if repliesExpanded {
+                                            expandedReplyParentIDs.remove(comment.id)
+                                        } else {
+                                            expandedReplyParentIDs.insert(comment.id)
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: repliesExpanded ? "chevron.down" : "chevron.right")
+                                            .font(.caption2.weight(.bold))
+                                        Text(repliesExpanded ? "Hide Replies" : "View Replies")
+                                            .font(.caption.weight(.semibold))
+                                        Text("\(replies.count)")
+                                            .font(.caption2.weight(.bold))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.white.opacity(0.08), in: Capsule())
+                                    }
+                                    .foregroundStyle(.white.opacity(0.78))
                                 }
+                                .buttonStyle(.plain)
+
+                                Spacer()
                             }
-                            .padding(.leading, 18)
+                            .padding(.leading, 4)
+
+                            if repliesExpanded {
+                                VStack(spacing: 10) {
+                                    ForEach(replies) { reply in
+                                        CommentRowCard(
+                                            comment: reply,
+                                            isReply: true,
+                                            reactionTypes: store.reactionTypes,
+                                            reactionCounts: store.commentReactionCounts(for: reply.id),
+                                            selectedReactionTypeIDs: store.viewerCommentReactionTypeIDsByComment[reply.id] ?? [],
+                                            reactionTotalOverride: store.commentReactionTotal(for: reply),
+                                            onReact: { reactionTypeID in
+                                                store.reactToComment(reply.id, reactionTypeId: reactionTypeID)
+                                            },
+                                            onReply: {
+                                                replyingToRootCommentID = comment.id
+                                            }
+                                        )
+                                    }
+                                }
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                                .padding(.leading, 18)
+                            }
                         }
                     }
                     .listRowSeparator(.hidden)
@@ -323,20 +448,25 @@ private struct PostCommentsDetailView: View {
                 }
 
                 if store.commentHasMoreByPost[post.id] == true {
-                    HStack {
-                        Spacer()
-                        Button {
-                            store.loadMoreComments(for: post.id)
-                        } label: {
-                            if store.commentIsLoadingByPost.contains(post.id) {
-                                ProgressView()
-                            } else {
-                                Text("Load More Comments")
-                                    .font(.footnote.weight(.semibold))
+                    VStack(spacing: 6) {
+                        HStack {
+                            Spacer()
+                            Button {
+                                store.loadMoreComments(for: post.id)
+                            } label: {
+                                if store.commentIsLoadingByPost.contains(post.id) {
+                                    ProgressView()
+                                } else {
+                                    Text("Load More Comments")
+                                        .font(.footnote.weight(.semibold))
+                                }
                             }
+                            .buttonStyle(.plain)
+                            Spacer()
                         }
-                        .buttonStyle(.plain)
-                        Spacer()
+                        Text("Showing \(comments.count) comments")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.45))
                     }
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
@@ -362,6 +492,15 @@ private struct PostCommentsDetailView: View {
         .task(id: post.id) {
             store.ensureCommentsLoaded(for: post.id)
         }
+        .overlay(alignment: .top) {
+            if let reactionErrorMessage = store.reactionErrorMessage {
+                ReactionErrorToast(message: reactionErrorMessage)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: store.reactionErrorMessage)
     }
 
     private var postHeader: some View {
@@ -382,7 +521,13 @@ private struct PostCommentsDetailView: View {
                     Label(String(format: "%.1f", hotScore), systemImage: "flame.fill")
                 }
                 Spacer()
-                Text("Top comments")
+                Picker("Comment Sort", selection: commentSortSelection) {
+                    ForEach(CommentSortMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 150)
             }
             .font(.caption)
             .foregroundStyle(.white.opacity(0.58))
@@ -456,6 +601,11 @@ private struct PostCommentsDetailView: View {
 private struct CommentRowCard: View {
     let comment: Comment
     let isReply: Bool
+    let reactionTypes: [ReactionType]
+    let reactionCounts: [CommentReactionCount]
+    let selectedReactionTypeIDs: Set<UUID>
+    let reactionTotalOverride: Int
+    let onReact: (UUID) -> Void
     let onReply: (() -> Void)?
 
     var body: some View {
@@ -465,8 +615,8 @@ private struct CommentRowCard: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.82))
                 Spacer()
-                if let reactionCount = comment.reaction_count, reactionCount > 0 {
-                    Label("\(reactionCount)", systemImage: "face.smiling")
+                if reactionTotalOverride > 0 {
+                    Label("\(reactionTotalOverride)", systemImage: "face.smiling")
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.55))
                 }
@@ -484,6 +634,47 @@ private struct CommentRowCard: View {
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.86))
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            if !reactionTypes.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(reactionTypes) { type in
+                            let count = reactionCounts.first(where: { $0.reactionTypeID == type.id })?.count ?? 0
+                            let isSelected = selectedReactionTypeIDs.contains(type.id)
+                            Button {
+                                onReact(type.id)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(type.emoji)
+                                    Text("\(count)")
+                                        .font(.caption2.weight(.semibold))
+                                }
+                                .foregroundStyle(.white.opacity(isSelected ? 0.96 : 0.74))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 4)
+                                .background(
+                                    (isSelected ? AppTheme.accent.opacity(0.18) : Color.white.opacity(0.04)),
+                                    in: Capsule()
+                                )
+                                .overlay {
+                                    Capsule()
+                                        .stroke(
+                                            isSelected ? AppTheme.accent.opacity(0.4) : Color.white.opacity(0.08),
+                                            lineWidth: 1
+                                        )
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        if reactionTotalOverride > 0 {
+                            Text("Total \(reactionTotalOverride)")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.48))
+                        }
+                    }
+                    .padding(.vertical, 1)
+                }
+            }
 
             if let onReply {
                 Button {

@@ -17,7 +17,7 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
 
 ## In Progress
 
-- [ ] Batch 2 (`%%%`) Client implementation sequence: comment reactions -> comment ranking toggle (`Top/New`) -> comment pagination UX polish -> animated expansion UI -> following feed client wiring (reuse centralized reaction state keyed by post ID)
+- [ ] Batch 3 (`%%%`) Advanced social loop: nested reply UI refinement, multi-reaction comment chips, comment sorting polish, notification trigger system (backend+client), architecture stress-test/perf guardrails
 
 ## Done
 
@@ -34,6 +34,12 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
   - realtime reconciliation via existing `post_metrics` subscription (comment_count change -> refresh loaded comments)
   - on-demand comments UI (sheet) with top-level comments + one-level nested replies
   - no feed-wide comment preloads / no N+1 comment fetches
+- [x] Batch 2 (`%%%`) Client implementation sequence:
+  - comment reactions (toggle + optimistic, centralized in `AppStore`)
+  - comment ranking toggle (`Top` / `New`)
+  - pagination UX polish (`load more`, page offsets, cache trim guardrails)
+  - animated/collapsible replies UI
+  - following feed client wiring (`following_feed_view`, segmented Hot/Following feed in `FeedView`)
 
 ## Parking Lot
 

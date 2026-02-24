@@ -6,16 +6,18 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Batch 1 client comments foundation implemented on centralized `AppStore`
+- Last milestone: Batch 2 client social feed enhancements (comment reactions/sort/following feed) implemented on centralized `AppStore`
 
 ## Latest Milestone
 
 ### Summary
 
-- Implemented Batch 1 client comments foundation on top of the new backend + centralized `AppStore`.
-- Comments now load on demand only (post comments sheet open), not during feed load.
-- Added top-level comments + one-level nested replies UI, optimistic comment insert, and realtime reconciliation through the existing `post_metrics` subscription path.
-- Kept feed/reactions architecture centralized in `AppStore` (no per-view comment arrays, no duplicate subscriptions).
+- Implemented Batch 2 client social enhancements on top of the centralized `AppStore` architecture.
+- Added comment reactions (toggle + optimistic) with centralized state, batched reaction-count hydration, and realtime reconciliation via `comment_metrics`.
+- Added comment sort toggle (`Top` / `New`) + paginated comment loading improvements.
+- Added animated/collapsible nested replies UI refinement.
+- Added following feed client wiring (`following_feed_view`) and `Hot`/`Following` scope switch in `FeedView`.
+- Kept feed/comment/reaction ownership centralized in `AppStore` (no per-view duplicated state or subscriptions).
 
 ### Files Touched
 
@@ -23,7 +25,6 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 - `PatchNotes/FeedService.swift`
 - `PatchNotes/Model/AppStore.swift`
 - `PatchNotes/Views/FeedView.swift`
-- `ASYNC_AGENT_WORKFLOW.md`
 - `ASYNC_AGENT_BACKLOG.md`
 - `ASYNC_AGENT_HANDOFF.md`
 
@@ -33,26 +34,25 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 ### Verification
 
-- `xcodebuild` simulator build succeeded after client changes (`** BUILD SUCCEEDED **`)
-- Simulator app relaunch succeeded (`xcrun simctl launch ... com.patchnotes.PatchNotes`)
-- Compile checks covered:
-  - `Comment` model decode from `post_comments_ranked`
-  - `FeedService` ranked comments fetch + comment insert APIs
-  - `AppStore` centralized comments state/optimistic insert/realtime refresh path
-  - `FeedView` comments sheet UI + nested replies rendering
+- `xcodebuild` simulator build succeeded after Batch 2 client changes (`** BUILD SUCCEEDED **`)
+- Simulator install + relaunch succeeded (`com.patchnotes.PatchNotes`)
+- Compile/runtime wiring checks covered:
+  - `FeedService` comment sort fetch path (`post_comments_ranked` + `comments`)
+  - batched comment reaction counts + viewer reaction fetches
+  - comment reaction insert/delete APIs
+  - `AppStore` following feed loading + centralized comment reaction state/realtime reconciliation
+  - `FeedView` hot/following segmented feed scope + comment sort toggle + animated reply collapse/expand UI
 
 ### Open Risks / Notes
 
-- No dedicated comment-detail/reaction error toast yet (comment insert failures currently rollback + console print only).
-- Pagination backend wiring exists in `AppStore` (`loadMoreComments` + offsets/page size), but UX polish for paging controls/sort toggles belongs to Batch 2.
-- Comment rows currently avoid author/profile fetches (intentional to prevent N+1 until public profile join/view strategy is chosen).
-- `following_feed_view` backend exists, but client wiring is deferred to Batch 2.
+- Comment author display is still anonymous/generic (intentional; no public profile join yet to avoid N+1 fetches).
+- Comment reactions are hydrated in batches for loaded comments, but there is no dedicated comment-reaction error toast yet (failures rollback + feed-level toast fallback).
+- `comment_metrics` realtime subscription is centralized and safe, but event storms may justify debounce/coalescing later if engagement spikes.
+- Following feed currently reuses post reaction state keyed by post ID (good), but UI-specific polish/filter affordances are still minimal.
 
 ## Next Recommended Action
 
-- Start Batch 2 client work in the requested order:
-  - comment reactions (toggle + optimistic, centralized in `AppStore`)
-  - comment ranking toggle (`Top` / `New`)
-  - pagination UX polish
-  - animated expansion UI
-  - following feed client wiring using existing `following_feed_view`
+- Start Batch 3 in the requested order, prioritizing backend/client notification loop closure and stress-test guardrails:
+  - notification trigger system (backend + client subscription + basic inbox surface)
+  - comment sorting/multi-reaction polish refinements (where gaps remain)
+  - architecture stress-test/perf guardrails (cache limits, reconciliation throttling, duplicate optimistic write defenses)

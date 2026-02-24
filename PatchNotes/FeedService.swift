@@ -20,10 +20,30 @@ final class FeedService {
         let reaction_type_id: UUID
     }
 
+    private struct UserCommentReactionRow: Decodable {
+        let comment_id: UUID
+        let reaction_type_id: UUID
+    }
+
+    private struct CommentReactionRow: Decodable {
+        let comment_id: UUID
+        let reaction_type_id: UUID
+    }
+
+    private struct CommentReactionInsertPayload: Encodable {
+        let post_id: UUID? = nil
+        let comment_id: UUID
+        let user_id: UUID
+        let reaction_type_id: UUID
+    }
+
     private let client = SupabaseManager.shared.client
     private var postMetricsChannel: RealtimeChannelV2?
     private var postMetricsSubscription: RealtimeSubscription?
+    private var commentMetricsChannel: RealtimeChannelV2?
+    private var commentMetricsSubscription: RealtimeSubscription?
     var onPostMetricsChange: (@MainActor @Sendable (UUID?) -> Void)?
+    var onCommentMetricsChange: (@MainActor @Sendable (UUID?) -> Void)?
     private static let iso8601WithFractionalSeconds: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -91,9 +111,56 @@ final class FeedService {
         }
     }
 
+    func subscribeToCommentMetrics(
+        onChange: @escaping @MainActor @Sendable (UUID?) -> Void
+    ) {
+        onCommentMetricsChange = onChange
+        subscribeToCommentMetrics()
+    }
+
+    func subscribeToCommentMetrics() {
+        guard commentMetricsChannel == nil else { return }
+
+        let channel = client.channel("public:comment_metrics")
+        let onCommentMetricsChange = onCommentMetricsChange
+        let subscription = channel.onPostgresChange(
+            AnyAction.self,
+            schema: "public",
+            table: "comment_metrics"
+        ) { payload in
+            let updatedCommentID = Self.commentID(from: payload)
+            Task { @MainActor in
+                onCommentMetricsChange?(updatedCommentID)
+            }
+        }
+
+        commentMetricsChannel = channel
+        commentMetricsSubscription = subscription
+
+        Task {
+            do {
+                try await channel.subscribeWithError()
+                print("Subscribed to comment_metrics realtime updates")
+            } catch {
+                print("Comment metrics realtime subscription error:", error)
+            }
+        }
+    }
+
     func fetchHotFeed() async throws -> [Post] {
         let response = try await client
             .from("hot_feed_view")
+            .select()
+            .limit(50)
+            .execute()
+
+        return try makeDatabaseDecoder().decode([Post].self, from: response.data)
+    }
+
+    func fetchFollowingFeed(accessToken: String) async throws -> [Post] {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        let response = try await client
+            .from("following_feed_view")
             .select()
             .limit(50)
             .execute()
@@ -113,19 +180,32 @@ final class FeedService {
         return posts.first
     }
 
-    func fetchRankedComments(
+    func fetchComments(
         postID: UUID,
+        sort: CommentSortMode,
         limit: Int,
         offset: Int
     ) async throws -> [Comment] {
-        let response = try await client
-            .from("post_comments_ranked")
-            .select("id,post_id,user_id,body,parent_comment_id,created_at,reaction_count,hot_score")
-            .eq("post_id", value: postID.uuidString)
-            .range(from: offset, to: max(offset + limit - 1, offset))
-            .execute()
-
-        return try makeDatabaseDecoder().decode([Comment].self, from: response.data)
+        let rangeEnd = max(offset + limit - 1, offset)
+        switch sort {
+        case .top:
+            let response = try await client
+                .from("post_comments_ranked")
+                .select("id,post_id,user_id,body,parent_comment_id,created_at,reaction_count,hot_score")
+                .eq("post_id", value: postID.uuidString)
+                .range(from: offset, to: rangeEnd)
+                .execute()
+            return try makeDatabaseDecoder().decode([Comment].self, from: response.data)
+        case .new:
+            let response = try await client
+                .from("comments")
+                .select("id,post_id,user_id,body,parent_comment_id,created_at")
+                .eq("post_id", value: postID.uuidString)
+                .order("created_at", ascending: false)
+                .range(from: offset, to: rangeEnd)
+                .execute()
+            return try makeDatabaseDecoder().decode([Comment].self, from: response.data)
+        }
     }
 
     func insertComment(
@@ -169,6 +249,33 @@ final class FeedService {
         return try JSONDecoder().decode([PostReactionCount].self, from: response.data)
     }
 
+    func fetchCommentReactionCounts(
+        commentIDs: [UUID]
+    ) async throws -> [UUID: [CommentReactionCount]] {
+        guard !commentIDs.isEmpty else { return [:] }
+
+        let response = try await client
+            .from("reactions")
+            .select("comment_id,reaction_type_id")
+            .in("comment_id", values: commentIDs.map(\.uuidString))
+            .execute()
+
+        let rows = try JSONDecoder().decode([CommentReactionRow].self, from: response.data)
+        var countsByCommentAndType: [UUID: [UUID: Int]] = [:]
+
+        for row in rows {
+            countsByCommentAndType[row.comment_id, default: [:]][row.reaction_type_id, default: 0] += 1
+        }
+
+        var result: [UUID: [CommentReactionCount]] = [:]
+        for (commentID, countsByType) in countsByCommentAndType {
+            result[commentID] = countsByType.map { reactionTypeID, count in
+                CommentReactionCount(comment_id: commentID, reaction_type_id: reactionTypeID, count: count)
+            }
+        }
+        return result
+    }
+
     func fetchReactionCounts(postIDs: [UUID]) async throws -> [UUID: [PostReactionCount]] {
         guard !postIDs.isEmpty else { return [:] }
 
@@ -199,6 +306,27 @@ final class FeedService {
         var result: [UUID: Set<UUID>] = [:]
         for row in rows {
             result[row.post_id, default: []].insert(row.reaction_type_id)
+        }
+        return result
+    }
+
+    func fetchViewerReactionsByComment(
+        userID: UUID,
+        commentIDs: [UUID]
+    ) async throws -> [UUID: Set<UUID>] {
+        guard !commentIDs.isEmpty else { return [:] }
+
+        let response = try await client
+            .from("reactions")
+            .select("comment_id,reaction_type_id")
+            .eq("user_id", value: userID.uuidString)
+            .in("comment_id", values: commentIDs.map(\.uuidString))
+            .execute()
+
+        let rows = try JSONDecoder().decode([UserCommentReactionRow].self, from: response.data)
+        var result: [UUID: Set<UUID>] = [:]
+        for row in rows {
+            result[row.comment_id, default: []].insert(row.reaction_type_id)
         }
         return result
     }
@@ -238,6 +366,41 @@ final class FeedService {
             .execute()
     }
 
+    func addCommentReaction(
+        commentId: UUID,
+        reactionTypeId: UUID,
+        userId: UUID,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await client
+            .from("reactions")
+            .insert(
+                CommentReactionInsertPayload(
+                    comment_id: commentId,
+                    user_id: userId,
+                    reaction_type_id: reactionTypeId
+                )
+            )
+            .execute()
+    }
+
+    func removeCommentReaction(
+        commentId: UUID,
+        reactionTypeId: UUID,
+        userId: UUID,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await client
+            .from("reactions")
+            .delete()
+            .eq("comment_id", value: commentId.uuidString)
+            .eq("user_id", value: userId.uuidString)
+            .eq("reaction_type_id", value: reactionTypeId.uuidString)
+            .execute()
+    }
+
     private static func postID(from action: AnyAction) -> UUID? {
         switch action {
         case .insert(let insertAction):
@@ -252,6 +415,22 @@ final class FeedService {
     private static func uuid(from record: [String: AnyJSON]) -> UUID? {
         guard let postID = record["post_id"]?.stringValue else { return nil }
         return UUID(uuidString: postID)
+    }
+
+    private static func commentID(from action: AnyAction) -> UUID? {
+        switch action {
+        case .insert(let insertAction):
+            return commentUUID(from: insertAction.record)
+        case .update(let updateAction):
+            return commentUUID(from: updateAction.record) ?? commentUUID(from: updateAction.oldRecord)
+        case .delete(let deleteAction):
+            return commentUUID(from: deleteAction.oldRecord)
+        }
+    }
+
+    private static func commentUUID(from record: [String: AnyJSON]) -> UUID? {
+        guard let commentID = record["comment_id"]?.stringValue else { return nil }
+        return UUID(uuidString: commentID)
     }
 
     private func makeDatabaseDecoder() -> JSONDecoder {
