@@ -946,7 +946,8 @@ private struct PostComposerView: View {
                 Picker("Attach Game (optional)", selection: $selectedGameID) {
                     Text("None").tag(Optional<UUID>.none)
                     ForEach(availableGames) { game in
-                        Text(game.title).tag(Optional(game.id))
+                        Text(store.isFollowingGame(game) ? "Following · \(game.title)" : game.title)
+                            .tag(Optional(game.id))
                     }
                 }
             }
