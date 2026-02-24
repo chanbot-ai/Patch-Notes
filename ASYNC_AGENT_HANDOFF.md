@@ -6,71 +6,53 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Backend-first comment/following feed foundation migrations applied + verified
+- Last milestone: Batch 1 client comments foundation implemented on centralized `AppStore`
 
 ## Latest Milestone
 
 ### Summary
 
-- Implemented and applied the requested backend-first migration batch for comment reactions, comment metrics/ranking, and following feed.
-- Fixed/closed Step 0 backend gaps discovered during audit:
-  - `comments` owner delete RLS policy was missing
-  - `comments` trigger path was not delete-aware for `post_metrics.comment_count`
-  - comments table contract expected non-null `post_id` / `user_id`
-- Added verification smoke tests (transactional, rolled back) for:
-  - post reaction insert/delete
-  - comment insert/delete (with `post_metrics.comment_count` updates)
-  - comment reaction insert/delete (with `post_comments_ranked.reaction_count` updates)
+- Implemented Batch 1 client comments foundation on top of the new backend + centralized `AppStore`.
+- Comments now load on demand only (post comments sheet open), not during feed load.
+- Added top-level comments + one-level nested replies UI, optimistic comment insert, and realtime reconciliation through the existing `post_metrics` subscription path.
+- Kept feed/reactions architecture centralized in `AppStore` (no per-view comment arrays, no duplicate subscriptions).
 
 ### Files Touched
 
-- `supabase/migrations/20260224052842_extend_reactions_for_comments.sql`
-- `supabase/migrations/20260224052843_create_comment_metrics_and_ranking.sql`
-- `supabase/migrations/20260224052844_create_following_feed_view.sql`
+- `PatchNotes/Model/Post.swift`
+- `PatchNotes/FeedService.swift`
+- `PatchNotes/Model/AppStore.swift`
+- `PatchNotes/Views/FeedView.swift`
 - `ASYNC_AGENT_WORKFLOW.md`
 - `ASYNC_AGENT_BACKLOG.md`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
 
-- `20260224052842` `extend_reactions_for_comments`
-- `20260224052843` `create_comment_metrics_and_ranking`
-- `20260224052844` `create_following_feed_view`
+- None in this milestone (uses prior backend-first comment/following migrations)
 
 ### Verification
 
-- `supabase migration list` local/remote aligned through `20260224052844`
-- Verified new objects exist:
-  - `public.comment_metrics`
-  - `public.post_comments_ranked`
-  - `public.following_feed_view`
-- Verified reactions schema/policies:
-  - `reactions.comment_id` added
-  - `reaction_target_check` present
-  - comment-target unique index present
-  - post reaction insert/delete policies remain authenticated-only
-- Verified comment/user_followed_games policies:
-  - `comments` insert/delete owner policies present
-  - `user_followed_games` insert/select/delete owner policies present for following feed
-- Verified trigger set:
-  - comment insert/delete -> `update_post_metrics_on_comment`
-  - comment insert -> `create_comment_metrics_row`
-  - comment reaction insert/delete -> `update_comment_metrics`
-- Transactional smoke test (rolled back) confirmed:
-  - comment_count `0 -> 1 -> 0`
-  - ranked comment reaction_count `0 -> 1 -> 0`
+- `xcodebuild` simulator build succeeded after client changes (`** BUILD SUCCEEDED **`)
+- Simulator app relaunch succeeded (`xcrun simctl launch ... com.patchnotes.PatchNotes`)
+- Compile checks covered:
+  - `Comment` model decode from `post_comments_ranked`
+  - `FeedService` ranked comments fetch + comment insert APIs
+  - `AppStore` centralized comments state/optimistic insert/realtime refresh path
+  - `FeedView` comments sheet UI + nested replies rendering
 
 ### Open Risks / Notes
 
-- `following_feed_view` backend exists, but client wiring is not implemented yet.
-- Comment client features are not implemented yet (fetch/pagination/replies/reactions UI).
-- `comments` table still allows public `SELECT` (intentional current behavior per existing policy).
-- Keep backend and client work separated by your `%%%` batch boundaries to avoid overscoping.
+- No dedicated comment-detail/reaction error toast yet (comment insert failures currently rollback + console print only).
+- Pagination backend wiring exists in `AppStore` (`loadMoreComments` + offsets/page size), but UX polish for paging controls/sort toggles belongs to Batch 2.
+- Comment rows currently avoid author/profile fetches (intentional to prevent N+1 until public profile join/view strategy is chosen).
+- `following_feed_view` backend exists, but client wiring is deferred to Batch 2.
 
 ## Next Recommended Action
 
-- Start Batch 1 client layer on top of the new backend foundation:
-  - `Comment` model + ranked/paginated fetch in `FeedService`
-  - centralized `AppStore.commentsByPost`
-  - optimistic comment insert + realtime reconciliation hook
-  - no comment preloading on feed list (load on post detail/expand only)
+- Start Batch 2 client work in the requested order:
+  - comment reactions (toggle + optimistic, centralized in `AppStore`)
+  - comment ranking toggle (`Top` / `New`)
+  - pagination UX polish
+  - animated expansion UI
+  - following feed client wiring using existing `following_feed_view`

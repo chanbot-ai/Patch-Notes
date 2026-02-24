@@ -30,3 +30,18 @@ struct PostReactionCount: Identifiable, Decodable, Equatable {
     var postID: UUID { post_id }
     var reactionTypeID: UUID { reaction_type_id }
 }
+
+struct Comment: Identifiable, Decodable, Equatable {
+    let id: UUID
+    let post_id: UUID
+    let user_id: UUID
+    let body: String
+    let parent_comment_id: UUID?
+    let created_at: Date
+    let reaction_count: Int?
+    let hot_score: Double?
+
+    var postID: UUID { post_id }
+    var userID: UUID { user_id }
+    var parentCommentID: UUID? { parent_comment_id }
+}

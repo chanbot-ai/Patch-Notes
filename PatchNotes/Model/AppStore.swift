@@ -20,6 +20,10 @@ final class AppStore: ObservableObject {
     @Published private(set) var viewerReactionTypeIDsByPost: [UUID: Set<UUID>]
     @Published private(set) var reactionTotalsByPost: [UUID: Int]
     @Published private(set) var reactionErrorMessage: String?
+    @Published private(set) var commentsByPost: [UUID: [Comment]]
+    @Published private(set) var commentIsLoadingByPost: Set<UUID>
+    @Published private(set) var commentLoadErrorByPost: [UUID: String]
+    @Published private(set) var commentHasMoreByPost: [UUID: Bool]
     @Published private(set) var feedIsLoading: Bool
     @Published private(set) var feedErrorMessage: String?
     @Published private(set) var ownedGames: [Game]
@@ -37,6 +41,8 @@ final class AppStore: ObservableObject {
     private var hasSubscribed = false
     private var authenticatedSession: Session?
     private var reactionErrorDismissTask: Task<Void, Never>?
+    private var commentOffsetsByPost: [UUID: Int]
+    private let commentPageSize = 20
 
     init(
         dataProvider: AppDataProviding = MockAppDataProvider(),
@@ -49,6 +55,10 @@ final class AppStore: ObservableObject {
         self.viewerReactionTypeIDsByPost = [:]
         self.reactionTotalsByPost = [:]
         self.reactionErrorMessage = nil
+        self.commentsByPost = [:]
+        self.commentIsLoadingByPost = []
+        self.commentLoadErrorByPost = [:]
+        self.commentHasMoreByPost = [:]
         self.feedIsLoading = false
         self.feedErrorMessage = nil
         self.ownedGames = []
@@ -59,6 +69,7 @@ final class AppStore: ObservableObject {
         self.esportsMatches = []
         self.esportsMarkets = []
         self.threadsByGame = [:]
+        self.commentOffsetsByPost = [:]
         refresh(referenceDate: referenceDate)
         configureFeedOwnership()
     }
@@ -171,6 +182,88 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func loadInitialComments(for postId: UUID) {
+        commentOffsetsByPost[postId] = 0
+        var nextComments = commentsByPost
+        nextComments[postId] = []
+        commentsByPost = nextComments
+
+        var nextHasMore = commentHasMoreByPost
+        nextHasMore[postId] = true
+        commentHasMoreByPost = nextHasMore
+
+        loadMoreComments(for: postId)
+    }
+
+    func ensureCommentsLoaded(for postId: UUID) {
+        if commentsByPost[postId] == nil {
+            loadInitialComments(for: postId)
+        }
+    }
+
+    func loadMoreComments(for postId: UUID) {
+        guard !commentIsLoadingByPost.contains(postId) else { return }
+        if let hasMore = commentHasMoreByPost[postId], !hasMore { return }
+
+        let offset = commentOffsetsByPost[postId] ?? 0
+        Task {
+            await fetchCommentsPage(for: postId, offset: offset, replaceExisting: offset == 0)
+        }
+    }
+
+    func addComment(to postId: UUID, body: String, parentId: UUID? = nil) {
+        let cleaned = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        guard let session = authenticatedSession else {
+            return
+        }
+
+        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else {
+            return
+        }
+
+        let userId = session.user.id
+        let normalizedParentId: UUID?
+        if let parentId,
+           let parent = commentsByPost[postId]?.first(where: { $0.id == parentId }),
+           let rootParentId = parent.parentCommentID {
+            normalizedParentId = rootParentId
+        } else {
+            normalizedParentId = parentId
+        }
+
+        let tempComment = Comment(
+            id: UUID(),
+            post_id: postId,
+            user_id: userId,
+            body: cleaned,
+            parent_comment_id: normalizedParentId,
+            created_at: Date(),
+            reaction_count: 0,
+            hot_score: 0
+        )
+
+        applyOptimisticCommentInsert(tempComment)
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.feedService.insertComment(
+                    postId: postId,
+                    body: cleaned,
+                    parentCommentId: normalizedParentId,
+                    userId: userId,
+                    accessToken: accessToken
+                )
+                // Realtime on post_metrics.comment_count will reconcile the full comment list.
+            } catch {
+                self.removeOptimisticComment(tempComment)
+                print("Comment insert failed:", error)
+            }
+        }
+    }
+
     func subscribeToFeedRealtime() {
         guard !hasSubscribed else { return }
         hasSubscribed = true
@@ -222,12 +315,30 @@ final class AppStore: ObservableObject {
                         var nextViewerSelections = viewerReactionTypeIDsByPost
                         nextViewerSelections.removeValue(forKey: postId)
                         viewerReactionTypeIDsByPost = nextViewerSelections
+
+                        var nextComments = commentsByPost
+                        nextComments.removeValue(forKey: postId)
+                        commentsByPost = nextComments
+
+                        var nextCommentLoading = commentIsLoadingByPost
+                        nextCommentLoading.remove(postId)
+                        commentIsLoadingByPost = nextCommentLoading
+
+                        var nextCommentErrors = commentLoadErrorByPost
+                        nextCommentErrors.removeValue(forKey: postId)
+                        commentLoadErrorByPost = nextCommentErrors
+
+                        var nextCommentHasMore = commentHasMoreByPost
+                        nextCommentHasMore.removeValue(forKey: postId)
+                        commentHasMoreByPost = nextCommentHasMore
                     }
+                    commentOffsetsByPost.removeValue(forKey: postId)
                 }
                 return
             }
 
             if let index = posts.firstIndex(where: { $0.id == postId }) {
+                let previousCommentCount = posts[index].comment_count
                 withAnimation(.easeInOut(duration: 0.2)) {
                     var nextPosts = posts
                     nextPosts[index] = updated
@@ -239,6 +350,10 @@ final class AppStore: ObservableObject {
                     reactionTotalsByPost = nextTotals
                 }
                 await refreshReactionState(for: [postId])
+                if commentsByPost[postId] != nil,
+                   previousCommentCount != updated.comment_count {
+                    await refreshLoadedComments(for: postId)
+                }
             } else {
                 // No full-feed realtime refetch here; manual refresh/load can reconcile membership.
             }
@@ -331,6 +446,10 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func comments(for postId: UUID) -> [Comment] {
+        commentsByPost[postId] ?? []
+    }
+
     private func configureFeedOwnership() {
         // reserved for future centralized store wiring (e.g., notifications/analytics hooks)
     }
@@ -366,6 +485,94 @@ final class AppStore: ObservableObject {
             return "Couldn’t update reaction. Check your connection and try again."
         }
         return "Couldn’t update reaction right now. Try again."
+    }
+
+    private func refreshLoadedComments(for postId: UUID) async {
+        guard commentsByPost[postId] != nil else { return }
+        let targetCount = max(commentOffsetsByPost[postId] ?? 0, commentPageSize)
+        await fetchCommentsPage(for: postId, offset: 0, limit: targetCount, replaceExisting: true)
+    }
+
+    private func fetchCommentsPage(
+        for postId: UUID,
+        offset: Int,
+        limit: Int? = nil,
+        replaceExisting: Bool
+    ) async {
+        guard posts.contains(where: { $0.id == postId }) else { return }
+
+        var nextLoading = commentIsLoadingByPost
+        nextLoading.insert(postId)
+        commentIsLoadingByPost = nextLoading
+
+        var nextErrors = commentLoadErrorByPost
+        nextErrors.removeValue(forKey: postId)
+        commentLoadErrorByPost = nextErrors
+
+        let pageLimit = max(limit ?? commentPageSize, 1)
+
+        defer {
+            var latestLoading = commentIsLoadingByPost
+            latestLoading.remove(postId)
+            commentIsLoadingByPost = latestLoading
+        }
+
+        do {
+            let fetched = try await feedService.fetchRankedComments(
+                postID: postId,
+                limit: pageLimit,
+                offset: offset
+            )
+
+            let merged: [Comment]
+            if replaceExisting || offset == 0 {
+                merged = fetched
+            } else {
+                let existing = commentsByPost[postId] ?? []
+                var seen = Set(existing.map(\.id))
+                var appended = existing
+                for comment in fetched where seen.insert(comment.id).inserted {
+                    appended.append(comment)
+                }
+                merged = appended
+            }
+
+            var nextComments = commentsByPost
+            nextComments[postId] = merged
+            commentsByPost = nextComments
+
+            commentOffsetsByPost[postId] = offset + fetched.count
+
+            var nextHasMore = commentHasMoreByPost
+            nextHasMore[postId] = fetched.count == pageLimit
+            commentHasMoreByPost = nextHasMore
+        } catch {
+            var latestErrors = commentLoadErrorByPost
+            latestErrors[postId] = error.localizedDescription
+            commentLoadErrorByPost = latestErrors
+            print("Failed to load comments:", error)
+        }
+    }
+
+    private func applyOptimisticCommentInsert(_ comment: Comment) {
+        var nextComments = commentsByPost
+        var current = nextComments[comment.postID] ?? []
+        current.insert(comment, at: 0)
+        nextComments[comment.postID] = current
+        commentsByPost = nextComments
+
+        var nextHasMore = commentHasMoreByPost
+        nextHasMore[comment.postID] = true
+        commentHasMoreByPost = nextHasMore
+    }
+
+    private func removeOptimisticComment(_ comment: Comment) {
+        guard var current = commentsByPost[comment.postID] else { return }
+        current.removeAll { $0.id == comment.id }
+
+        var nextComments = commentsByPost
+        nextComments[comment.postID] = current
+        commentsByPost = nextComments
     }
 
     private func refreshReactionTypes() async {

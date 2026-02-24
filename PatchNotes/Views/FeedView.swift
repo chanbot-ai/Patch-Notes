@@ -7,6 +7,7 @@ struct FeedView: View {
     @EnvironmentObject private var store: AppStore
 
     @State private var showingComposer = false
+    @State private var selectedCommentsPost: Post?
 
     var body: some View {
         List {
@@ -49,6 +50,9 @@ struct FeedView: View {
                     selectedReactionTypeIDs: store.viewerReactionTypeIDsByPost[post.id] ?? [],
                     onReact: { reactionTypeID in
                         store.react(to: post.id, with: reactionTypeID)
+                    },
+                    onOpenComments: {
+                        selectedCommentsPost = post
                     }
                 )
                     .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
@@ -79,6 +83,14 @@ struct FeedView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(item: $selectedCommentsPost) { post in
+            NavigationStack {
+                PostCommentsDetailView(post: post)
+                    .environmentObject(store)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
         .refreshable {
             await store.refreshHotFeed()
         }
@@ -101,6 +113,7 @@ private struct FeedPostRow: View {
     let reactionCounts: [PostReactionCount]
     let selectedReactionTypeIDs: Set<UUID>
     let onReact: (UUID) -> Void
+    let onOpenComments: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -163,7 +176,12 @@ private struct FeedPostRow: View {
 
             HStack(spacing: 12) {
                 Label("\(reactionCountOverride)", systemImage: "face.smiling")
-                Label("\(post.comment_count ?? 0)", systemImage: "bubble.right")
+                Button {
+                    onOpenComments()
+                } label: {
+                    Label("\(post.comment_count ?? 0)", systemImage: "bubble.right")
+                }
+                .buttonStyle(.plain)
                 if let hotScore = post.hot_score {
                     Label(String(format: "%.1f", hotScore), systemImage: "flame.fill")
                 }
@@ -172,6 +190,18 @@ private struct FeedPostRow: View {
             }
             .font(.caption)
             .foregroundStyle(.white.opacity(0.55))
+
+            Button {
+                onOpenComments()
+            } label: {
+                Text((post.comment_count ?? 0) > 0 ? "View Comments" : "Add Comment")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(AppTheme.accent.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
         }
         .padding(14)
         .background(
@@ -185,6 +215,295 @@ private struct FeedPostRow: View {
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
+    }
+}
+
+private struct PostCommentsDetailView: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+
+    let post: Post
+
+    @State private var draftComment = ""
+    @State private var replyingToRootCommentID: UUID?
+
+    private var comments: [Comment] {
+        store.comments(for: post.id)
+    }
+
+    private var rootComments: [Comment] {
+        comments.filter { $0.parentCommentID == nil }
+    }
+
+    private var repliesByParent: [UUID: [Comment]] {
+        Dictionary(
+            grouping: comments.filter { $0.parentCommentID != nil },
+            by: { $0.parentCommentID! }
+        )
+    }
+
+    private var replyTargetComment: Comment? {
+        guard let replyingToRootCommentID else { return nil }
+        return rootComments.first(where: { $0.id == replyingToRootCommentID })
+    }
+
+    private var canSubmit: Bool {
+        !draftComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            List {
+                postHeader
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+
+                if store.commentIsLoadingByPost.contains(post.id) && comments.isEmpty {
+                    HStack {
+                        Spacer()
+                        ProgressView("Loading comments...")
+                        Spacer()
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+
+                if let loadError = store.commentLoadErrorByPost[post.id], comments.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Comments failed to load")
+                            .font(.headline)
+                        Text(loadError)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Retry") {
+                            store.loadInitialComments(for: post.id)
+                        }
+                    }
+                    .foregroundStyle(.red)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+
+                if !store.commentIsLoadingByPost.contains(post.id),
+                   comments.isEmpty,
+                   store.commentLoadErrorByPost[post.id] == nil {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("No comments yet")
+                            .font(.headline)
+                        Text("Start the conversation.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+
+                ForEach(rootComments) { comment in
+                    VStack(alignment: .leading, spacing: 10) {
+                        CommentRowCard(
+                            comment: comment,
+                            isReply: false,
+                            onReply: {
+                                replyingToRootCommentID = comment.id
+                            }
+                        )
+
+                        if let replies = repliesByParent[comment.id], !replies.isEmpty {
+                            VStack(spacing: 10) {
+                                ForEach(replies) { reply in
+                                    CommentRowCard(comment: reply, isReply: true, onReply: nil)
+                                }
+                            }
+                            .padding(.leading, 18)
+                        }
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+
+                if store.commentHasMoreByPost[post.id] == true {
+                    HStack {
+                        Spacer()
+                        Button {
+                            store.loadMoreComments(for: post.id)
+                        } label: {
+                            if store.commentIsLoadingByPost.contains(post.id) {
+                                ProgressView()
+                            } else {
+                                Text("Load More Comments")
+                                    .font(.footnote.weight(.semibold))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
+
+            commentComposer
+                .background(.ultraThinMaterial)
+                .overlay(alignment: .top) {
+                    Divider().opacity(0.25)
+                }
+        }
+        .navigationTitle("Comments")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Done") { dismiss() }
+            }
+        }
+        .task(id: post.id) {
+            store.ensureCommentsLoaded(for: post.id)
+        }
+    }
+
+    private var postHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title = post.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+            }
+            if let body = post.body?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty {
+                Text(body)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.78))
+            }
+            HStack(spacing: 10) {
+                Label("\(post.comment_count ?? 0)", systemImage: "bubble.right")
+                if let hotScore = post.hot_score {
+                    Label(String(format: "%.1f", hotScore), systemImage: "flame.fill")
+                }
+                Spacer()
+                Text("Top comments")
+            }
+            .font(.caption)
+            .foregroundStyle(.white.opacity(0.58))
+        }
+        .padding(14)
+        .background(
+            LinearGradient(
+                colors: [Color.white.opacity(0.06), Color.white.opacity(0.03)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
+    }
+
+    private var commentComposer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if replyTargetComment != nil {
+                HStack(spacing: 8) {
+                    Text("Replying to comment")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.82))
+                    Spacer()
+                    Button("Cancel") {
+                        replyingToRootCommentID = nil
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+            }
+
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField(
+                    replyTargetComment == nil ? "Add a comment..." : "Write a reply...",
+                    text: $draftComment,
+                    axis: .vertical
+                )
+                .lineLimit(1...5)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                Button {
+                    let parentId = replyingToRootCommentID
+                    store.addComment(to: post.id, body: draftComment, parentId: parentId)
+                    draftComment = ""
+                    replyingToRootCommentID = nil
+                } label: {
+                    Text("Send")
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(AppTheme.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSubmit)
+                .opacity(canSubmit ? 1 : 0.45)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+    }
+}
+
+private struct CommentRowCard: View {
+    let comment: Comment
+    let isReply: Bool
+    let onReply: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(isReply ? "Reply" : "Comment")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                Spacer()
+                if let reactionCount = comment.reaction_count, reactionCount > 0 {
+                    Label("\(reactionCount)", systemImage: "face.smiling")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                if let hotScore = comment.hot_score, hotScore > 0 {
+                    Label(String(format: "%.0f", hotScore), systemImage: "flame.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                Text(comment.created_at, style: .relative)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+
+            Text(comment.body)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.86))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let onReply {
+                Button {
+                    onReply()
+                } label: {
+                    Label("Reply", systemImage: "arrowshape.turn.up.left")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(isReply ? 0.03 : 0.05))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(isReply ? 0.06 : 0.08), lineWidth: 1)
         }
     }
 }

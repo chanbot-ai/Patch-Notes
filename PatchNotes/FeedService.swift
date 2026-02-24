@@ -8,6 +8,13 @@ final class FeedService {
         let reaction_type_id: UUID
     }
 
+    private struct CommentInsertPayload: Encodable {
+        let post_id: UUID
+        let user_id: UUID
+        let body: String
+        let parent_comment_id: UUID?
+    }
+
     private struct UserReactionRow: Decodable {
         let post_id: UUID
         let reaction_type_id: UUID
@@ -91,7 +98,7 @@ final class FeedService {
             .limit(50)
             .execute()
 
-        return try makePostDecoder().decode([Post].self, from: response.data)
+        return try makeDatabaseDecoder().decode([Post].self, from: response.data)
     }
 
     func fetchPost(postID: UUID) async throws -> Post? {
@@ -102,8 +109,44 @@ final class FeedService {
             .limit(1)
             .execute()
 
-        let posts = try makePostDecoder().decode([Post].self, from: response.data)
+        let posts = try makeDatabaseDecoder().decode([Post].self, from: response.data)
         return posts.first
+    }
+
+    func fetchRankedComments(
+        postID: UUID,
+        limit: Int,
+        offset: Int
+    ) async throws -> [Comment] {
+        let response = try await client
+            .from("post_comments_ranked")
+            .select("id,post_id,user_id,body,parent_comment_id,created_at,reaction_count,hot_score")
+            .eq("post_id", value: postID.uuidString)
+            .range(from: offset, to: max(offset + limit - 1, offset))
+            .execute()
+
+        return try makeDatabaseDecoder().decode([Comment].self, from: response.data)
+    }
+
+    func insertComment(
+        postId: UUID,
+        body: String,
+        parentCommentId: UUID?,
+        userId: UUID,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await client
+            .from("comments")
+            .insert(
+                CommentInsertPayload(
+                    post_id: postId,
+                    user_id: userId,
+                    body: body,
+                    parent_comment_id: parentCommentId
+                )
+            )
+            .execute()
     }
 
     func fetchReactionTypes() async throws -> [ReactionType] {
@@ -211,7 +254,7 @@ final class FeedService {
         return UUID(uuidString: postID)
     }
 
-    private func makePostDecoder() -> JSONDecoder {
+    private func makeDatabaseDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()

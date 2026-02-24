@@ -17,7 +17,7 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
 
 ## In Progress
 
-- [ ] Batch 1 backend-first migration foundation for comments/following feed (completed in code/db, pending commit/push + handoff finalization)
+- [ ] Batch 2 (`%%%`) Client implementation sequence: comment reactions -> comment ranking toggle (`Top/New`) -> comment pagination UX polish -> animated expansion UI -> following feed client wiring (reuse centralized reaction state keyed by post ID)
 
 ## Done
 
@@ -27,6 +27,13 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
   - `comment_metrics` + `post_comments_ranked`
   - `following_feed_view`
   - comments owner delete policy + comment_count decrement trigger support
+- [x] Batch 1 (`%%%`) Client comments foundation on centralized `AppStore`:
+  - `Comment` model + ranked comments fetch (`post_comments_ranked`)
+  - centralized `commentsByPost` state (with paging baseline metadata)
+  - optimistic comment insert (top-level + reply)
+  - realtime reconciliation via existing `post_metrics` subscription (comment_count change -> refresh loaded comments)
+  - on-demand comments UI (sheet) with top-level comments + one-level nested replies
+  - no feed-wide comment preloads / no N+1 comment fetches
 
 ## Parking Lot
 
