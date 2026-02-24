@@ -6,68 +6,53 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Batch 3 notification loop + realtime/perf guardrails implemented on centralized `AppStore`
+- Last milestone: Roadmap tranche 1 started (game follows + game-linked posts) after Batch 3 checkpoint
 
 ## Latest Milestone
 
 ### Summary
 
-- Implemented Batch 3 notification loop + guardrails on top of the centralized `AppStore` architecture.
-- Added backend notifications system (`public.notifications`) with comment/reply triggers, RLS, grants, and realtime publication.
-- Added client notifications inbox UI (bell badge + sheet) with centralized `AppStore` state, authenticated fetch/update APIs, and realtime refresh subscription.
-- Added performance/stability guardrails for higher engagement load:
-  - coalesced comment-thread refreshes on `comment_metrics` realtime bursts
-  - debounced notifications refresh on realtime bursts
-  - in-flight post refresh dedupe
-  - duplicate reaction toggle request guards (posts + comments)
-- Kept all feed/comment/reaction/notification ownership centralized in `AppStore` (no per-view subscriptions).
+- Began the open-ended roadmap phase with the highest-leverage item: making the Following feed actually usable end-to-end.
+- Added centralized backend-synced followed-game state to `AppStore` (`user_followed_games`), plus optimistic follow/unfollow mutations.
+- Added `FeedService` follow/unfollow APIs with a `games` catalog ensure step so follows can succeed without manual DB seeding.
+- Added follow/unfollow control to `GameReleaseDetailView` (Release Calendar detail flow).
+- Added optional linked-game picker to post composer and writes `posts.game_id`, which enables new posts to appear in `following_feed_view` when users follow that game.
+- This directly connects the release calendar/watch behavior to the social feed personalization loop.
 
 ### Files Touched
 
-- `PatchNotes/Model/Post.swift`
 - `PatchNotes/FeedService.swift`
 - `PatchNotes/Model/AppStore.swift`
 - `PatchNotes/Views/FeedView.swift`
-- `supabase/migrations/20260224063600_create_notifications_system.sql`
+- `PatchNotes/Views/ReleaseCalendarView.swift`
 - `ASYNC_AGENT_BACKLOG.md`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
 
-- `20260224063600_create_notifications_system.sql`
-  - `public.notifications` table
-  - `create_notifications_for_comment()` trigger function
-  - `comment_insert_notifications_trigger`
-  - owner-only notifications RLS (`SELECT`/`UPDATE`)
-  - authenticated `SELECT, UPDATE` grants
-  - `supabase_realtime` publication registration
+- None in this milestone (uses existing `games` / `user_followed_games` schema + policies)
 
 ### Verification
 
-- `supabase db push` applied notification migration cleanly
-- Live DB verification completed:
-  - `public.notifications` schema, RLS policies, grants
-  - `comment_insert_notifications_trigger` presence
-  - `supabase_realtime` publication includes `public.notifications`
-  - transactional smoke tests confirmed notification insert on comment triggers (rolled back)
-- `xcodebuild` simulator build succeeded after Batch 3 backend/client changes (`** BUILD SUCCEEDED **`)
+- `xcodebuild` simulator build succeeded after roadmap tranche changes (`** BUILD SUCCEEDED **`)
 - Simulator install + relaunch succeeded (`com.patchnotes.PatchNotes`)
 - Compile/runtime wiring checks covered:
-  - authenticated notifications fetch/update APIs in `FeedService`
-  - `AppStore` notifications state + realtime subscription + coalesced refresh
-  - in-flight guardrails (post refresh/reaction toggles)
-  - `FeedView` notifications bell badge + inbox sheet
+  - `FeedService` followed-game fetch/follow/unfollow + `games` catalog ensure helper
+  - `AppStore` centralized followed-game state + optimistic follow toggles + following-feed refresh on mutation
+  - post composer optional game picker -> `posts.game_id` insert path
+  - release detail follow/unfollow UI wiring
 
 ### Open Risks / Notes
 
-- Notification rows currently show generic text (no actor profile join/display yet).
-- Notification inbox taps mark as read but do not deep-link into posts/comments yet.
-- Following feed client wiring exists, but follow/unfollow game management UI is still the next major unlock.
-- Comment author/profile rendering is still generic (intentional to avoid N+1 until view/join strategy is chosen).
+- `games` table is currently permissive (legacy grants / no explicit RLS); this tranche uses it as-is for velocity, but hardening is recommended before production.
+- Release detail now supports follow/unfollow, but follow controls are not yet surfaced across all game surfaces (My Games rows / calendar cards).
+- Following feed usefulness still depends on posts having `game_id`; composer now supports this, but older posts remain unlinked.
+- Notification inbox exists, but deep-linking + actor profile display are still next in the roadmap.
 
 ## Next Recommended Action
 
-- Start open-ended roadmap execution toward “Sleeper sports app of video games” vision:
-  - prioritize follow/unfollow game management UI + backend syncing (unlocks usable Following feed)
-  - then add notification deep-linking and actor profile display
-  - then profile/public identity joins for posts/comments without N+1 fetches
+- Continue open-ended roadmap execution (priority order):
+  1. Notification deep-linking + actor profile display (close engagement loop UX)
+  2. Harden `games` table access model (RLS/grants) now that app writes to it
+  3. Surface follow/unfollow controls across more game surfaces + show followed badges in feed/composer
+  4. Public profile joins/views for posts/comments (no N+1 author fetches)

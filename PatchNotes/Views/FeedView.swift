@@ -147,6 +147,7 @@ struct FeedView: View {
                     store.loadHotFeed()
                 }
                 .environmentObject(authManager)
+                .environmentObject(store)
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
@@ -887,12 +888,14 @@ private struct ReactionErrorToast: View {
 
 private struct PostComposerView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     let onPostCreated: @MainActor () -> Void
 
     @State private var title = ""
     @State private var bodyText = ""
+    @State private var selectedGameID: UUID?
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -905,6 +908,13 @@ private struct PostComposerView: View {
 
                 TextField("What's happening?", text: $bodyText, axis: .vertical)
                     .lineLimit(4...10)
+
+                Picker("Attach Game (optional)", selection: $selectedGameID) {
+                    Text("None").tag(Optional<UUID>.none)
+                    ForEach(availableGames) { game in
+                        Text(game.title).tag(Optional(game.id))
+                    }
+                }
             }
 
             Section {
@@ -943,6 +953,15 @@ private struct PostComposerView: View {
         !trimmedTitle.isEmpty || !trimmedBody.isEmpty
     }
 
+    private var availableGames: [Game] {
+        store.socialGames.sorted { lhs, rhs in
+            if lhs.releaseDate == rhs.releaseDate {
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            return lhs.releaseDate < rhs.releaseDate
+        }
+    }
+
     private var trimmedTitle: String {
         title.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -967,6 +986,7 @@ private struct PostComposerView: View {
             do {
                 try await service.createTextPost(
                     session: session,
+                    linkedGame: availableGames.first(where: { $0.id == selectedGameID }),
                     title: trimmedTitle.isEmpty ? nil : trimmedTitle,
                     body: trimmedBody.isEmpty ? nil : trimmedBody
                 )
@@ -982,14 +1002,18 @@ private struct PostComposerView: View {
 private struct PostComposerService {
     private struct NewPostInsert: Encodable {
         let author_id: UUID
+        let game_id: UUID?
         let type: String
         let title: String?
         let body: String?
         let is_system_generated: Bool
     }
 
+    private let feedService = FeedService()
+
     func createTextPost(
         session: Session,
+        linkedGame: Game?,
         title: String?,
         body: String?
     ) async throws {
@@ -1003,12 +1027,16 @@ private struct PostComposerService {
         }
 
         let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        if let linkedGame {
+            try await feedService.ensureGameExists(linkedGame, accessToken: accessToken)
+        }
 
         try await client
             .from("posts")
             .insert(
                 NewPostInsert(
                     author_id: session.user.id,
+                    game_id: linkedGame?.id,
                     type: "text",
                     title: title,
                     body: body,

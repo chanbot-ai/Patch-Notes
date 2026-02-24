@@ -37,6 +37,23 @@ final class FeedService {
         let reaction_type_id: UUID
     }
 
+    private struct FollowedGameRow: Decodable {
+        let game_id: UUID
+    }
+
+    private struct UserFollowedGameInsertPayload: Encodable {
+        let user_id: UUID
+        let game_id: UUID
+    }
+
+    private struct GameCatalogInsertPayload: Encodable {
+        let id: UUID
+        let title: String
+        let cover_image_url: String?
+        let release_date: String?
+        let genre: String?
+    }
+
     private struct NotificationReadUpdatePayload: Encodable {
         let read: Bool
     }
@@ -79,6 +96,15 @@ final class FeedService {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return formatter
+    }()
+
+    private static let sqlDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
 
@@ -219,6 +245,87 @@ final class FeedService {
             .execute()
 
         return try makeDatabaseDecoder().decode([Post].self, from: response.data)
+    }
+
+    func fetchFollowedGameIDs(
+        userID: UUID,
+        accessToken: String
+    ) async throws -> Set<UUID> {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        let response = try await client
+            .from("user_followed_games")
+            .select("game_id")
+            .eq("user_id", value: userID.uuidString)
+            .execute()
+
+        let rows = try JSONDecoder().decode([FollowedGameRow].self, from: response.data)
+        return Set(rows.map(\.game_id))
+    }
+
+    func ensureGameExists(
+        _ game: Game,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        do {
+            try await client
+                .from("games")
+                .insert(
+                    GameCatalogInsertPayload(
+                        id: game.id,
+                        title: game.title,
+                        cover_image_url: game.coverImageURL?.absoluteString,
+                        release_date: Self.sqlDateFormatter.string(from: game.releaseDate),
+                        genre: game.genre
+                    )
+                )
+                .execute()
+        } catch {
+            let raw = [error.localizedDescription, String(describing: error)]
+                .joined(separator: " | ")
+                .lowercased()
+            if raw.contains("duplicate key") || raw.contains("games_pkey") {
+                return
+            }
+            throw error
+        }
+    }
+
+    func followGame(
+        _ game: Game,
+        userID: UUID,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await ensureGameExists(game, accessToken: accessToken)
+        do {
+            try await client
+                .from("user_followed_games")
+                .insert(UserFollowedGameInsertPayload(user_id: userID, game_id: game.id))
+                .execute()
+        } catch {
+            let raw = [error.localizedDescription, String(describing: error)]
+                .joined(separator: " | ")
+                .lowercased()
+            if raw.contains("duplicate key") || raw.contains("user_followed_games_pkey") {
+                return
+            }
+            throw error
+        }
+    }
+
+    func unfollowGame(
+        gameID: UUID,
+        userID: UUID,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await client
+            .from("user_followed_games")
+            .delete()
+            .eq("user_id", value: userID.uuidString)
+            .eq("game_id", value: gameID.uuidString)
+            .execute()
     }
 
     func fetchPost(postID: UUID) async throws -> Post? {

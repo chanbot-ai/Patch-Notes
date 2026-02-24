@@ -30,6 +30,9 @@ final class AppStore: ObservableObject {
     @Published private(set) var notifications: [AppNotification]
     @Published private(set) var notificationsIsLoading: Bool
     @Published private(set) var notificationsErrorMessage: String?
+    @Published private(set) var followedGameIDs: Set<Game.ID>
+    @Published private(set) var followedGamesIsLoading: Bool
+    @Published private(set) var followedGamesErrorMessage: String?
     @Published private(set) var feedIsLoading: Bool
     @Published private(set) var feedErrorMessage: String?
     @Published private(set) var followingPosts: [Post]
@@ -61,6 +64,7 @@ final class AppStore: ObservableObject {
     private var pendingCommentRealtimePostIDs: Set<UUID>
     private var pendingCommentRealtimeRefreshTask: Task<Void, Never>?
     private var pendingNotificationsRefreshTask: Task<Void, Never>?
+    private var inFlightFollowToggleGameIDs: Set<Game.ID>
 
     init(
         dataProvider: AppDataProviding = MockAppDataProvider(),
@@ -83,6 +87,9 @@ final class AppStore: ObservableObject {
         self.notifications = []
         self.notificationsIsLoading = false
         self.notificationsErrorMessage = nil
+        self.followedGameIDs = []
+        self.followedGamesIsLoading = false
+        self.followedGamesErrorMessage = nil
         self.feedIsLoading = false
         self.feedErrorMessage = nil
         self.followingPosts = []
@@ -101,6 +108,7 @@ final class AppStore: ObservableObject {
         self.inFlightPostReactionKeys = []
         self.inFlightCommentReactionKeys = []
         self.pendingCommentRealtimePostIDs = []
+        self.inFlightFollowToggleGameIDs = []
         refresh(referenceDate: referenceDate)
         configureFeedOwnership()
     }
@@ -129,6 +137,61 @@ final class AppStore: ObservableObject {
 
     func isFavorite(_ game: Game) -> Bool {
         favoriteReleaseIDs.contains(game.id)
+    }
+
+    func isFollowingGame(_ game: Game) -> Bool {
+        followedGameIDs.contains(game.id)
+    }
+
+    func toggleFollowedGame(_ game: Game) {
+        guard let session = authenticatedSession else {
+            return
+        }
+
+        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else { return }
+        guard !inFlightFollowToggleGameIDs.contains(game.id) else { return }
+
+        let userID = session.user.id
+        let wasFollowing = followedGameIDs.contains(game.id)
+        let previous = followedGameIDs
+
+        inFlightFollowToggleGameIDs.insert(game.id)
+        if wasFollowing {
+            var next = followedGameIDs
+            next.remove(game.id)
+            followedGameIDs = next
+        } else {
+            var next = followedGameIDs
+            next.insert(game.id)
+            followedGameIDs = next
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.inFlightFollowToggleGameIDs.remove(game.id) }
+            do {
+                if wasFollowing {
+                    try await self.feedService.unfollowGame(
+                        gameID: game.id,
+                        userID: userID,
+                        accessToken: accessToken
+                    )
+                } else {
+                    try await self.feedService.followGame(
+                        game,
+                        userID: userID,
+                        accessToken: accessToken
+                    )
+                }
+                self.followedGamesErrorMessage = nil
+                await self.refreshFollowingFeed()
+            } catch {
+                self.followedGameIDs = previous
+                self.followedGamesErrorMessage = error.localizedDescription
+                print("Failed to toggle followed game:", error)
+            }
+        }
     }
 
     func releases(forMonthContaining date: Date) -> [Game] {
@@ -196,6 +259,9 @@ final class AppStore: ObservableObject {
         if authenticatedSession != nil, notifications.isEmpty && !notificationsIsLoading {
             loadNotifications()
         }
+        if authenticatedSession != nil, followedGameIDs.isEmpty && !followedGamesIsLoading {
+            loadFollowedGames()
+        }
     }
 
     func setAuthenticatedSession(_ session: Session?) {
@@ -211,6 +277,9 @@ final class AppStore: ObservableObject {
             notifications = []
             notificationsErrorMessage = nil
             notificationsIsLoading = false
+            followedGameIDs = []
+            followedGamesErrorMessage = nil
+            followedGamesIsLoading = false
         }
 
         if session == nil {
@@ -229,6 +298,7 @@ final class AppStore: ObservableObject {
             inFlightPostReactionKeys = []
             inFlightCommentReactionKeys = []
             inFlightPostRefreshIDs = []
+            inFlightFollowToggleGameIDs = []
             pendingCommentRealtimePostIDs = []
             pendingCommentRealtimeRefreshTask?.cancel()
             pendingCommentRealtimeRefreshTask = nil
@@ -258,6 +328,12 @@ final class AppStore: ObservableObject {
     func loadNotifications() {
         Task {
             await refreshNotifications()
+        }
+    }
+
+    func loadFollowedGames() {
+        Task {
+            await refreshFollowedGames()
         }
     }
 
@@ -529,6 +605,37 @@ final class AppStore: ObservableObject {
         } catch {
             followingFeedErrorMessage = error.localizedDescription
             print("Error loading following feed:", error)
+        }
+    }
+
+    func refreshFollowedGames() async {
+        guard let session = authenticatedSession else {
+            followedGameIDs = []
+            followedGamesErrorMessage = nil
+            followedGamesIsLoading = false
+            return
+        }
+
+        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else {
+            followedGameIDs = []
+            followedGamesErrorMessage = "Session expired"
+            followedGamesIsLoading = false
+            return
+        }
+
+        followedGamesIsLoading = true
+        followedGamesErrorMessage = nil
+        defer { followedGamesIsLoading = false }
+
+        do {
+            followedGameIDs = try await feedService.fetchFollowedGameIDs(
+                userID: session.user.id,
+                accessToken: accessToken
+            )
+        } catch {
+            followedGamesErrorMessage = error.localizedDescription
+            print("Error loading followed games:", error)
         }
     }
 

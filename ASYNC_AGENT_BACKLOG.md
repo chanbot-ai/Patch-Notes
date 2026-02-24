@@ -18,6 +18,12 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
 ## In Progress
 
 - [ ] Open-ended roadmap execution: propose next feature roadmap toward “Sleeper sports app of video games” vision and begin implementing highest-value item(s) on `codex/async-dev`
+  - Roadmap priority (current):
+    1. Game follow management + game-linked posts (activate Following feed end-to-end)
+    2. Notification deep-linking + actor profile display
+    3. Public profile joins/views for posts/comments (no N+1)
+    4. Social composer/media enrichment + game context chips in feed rows
+    5. Release Calendar polish pass tied to follow/watch state and social activity
 
 ## Done
 
@@ -49,6 +55,11 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
     - in-flight post refresh dedupe
     - duplicate reaction toggle request guards (post + comment)
   - nested reply UI refinement / multi-reaction comment chips / comment sorting polish were already largely completed in Batch 2
+- [x] Open-ended roadmap tranche 1 (started):
+  - centralized backend-synced followed game state in `AppStore`
+  - follow/unfollow game mutations against `user_followed_games` (with `games` catalog ensure step)
+  - release-detail follow/unfollow control
+  - post composer optional linked game picker (`posts.game_id`) to seed Following feed content
 
 ## Parking Lot
 
