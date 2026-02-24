@@ -162,7 +162,12 @@ struct FeedView: View {
         }
         .sheet(isPresented: $showingNotifications) {
             NavigationStack {
-                NotificationsInboxView()
+                NotificationsInboxView { notification in
+                    Task { @MainActor in
+                        guard let post = await store.resolveNotificationPost(notification) else { return }
+                        selectedCommentsPost = post
+                    }
+                }
                     .environmentObject(store)
             }
             .presentationDetents([.medium, .large])
@@ -732,6 +737,8 @@ private struct NotificationsInboxView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
+    let onOpenNotificationPost: @MainActor (AppNotification) -> Void
+
     var body: some View {
         List {
             if store.notificationsIsLoading && store.notifications.isEmpty {
@@ -775,8 +782,18 @@ private struct NotificationsInboxView: View {
             ForEach(store.notifications) { notification in
                 Button {
                     store.markNotificationRead(notification.id)
+                    if notification.postID != nil {
+                        dismiss()
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 250_000_000)
+                            onOpenNotificationPost(notification)
+                        }
+                    }
                 } label: {
-                    NotificationRow(notification: notification)
+                    NotificationRow(
+                        notification: notification,
+                        actorProfile: store.notificationActorProfile(for: notification.actorUserID)
+                    )
                 }
                 .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
@@ -814,6 +831,7 @@ private struct NotificationsInboxView: View {
 
 private struct NotificationRow: View {
     let notification: AppNotification
+    let actorProfile: PublicProfile?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -841,7 +859,7 @@ private struct NotificationRow: View {
                         .foregroundStyle(.white.opacity(0.45))
                 }
 
-                Text(notification.bodyText)
+                Text(notificationMessageText)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.62))
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -856,6 +874,22 @@ private struct NotificationRow: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(notification.isRead ? Color.white.opacity(0.06) : AppTheme.accent.opacity(0.18), lineWidth: 1)
         }
+    }
+
+    private var notificationMessageText: String {
+        if let actorProfile {
+            let actorName = actorProfile.display_name?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let actor = (actorName?.isEmpty == false ? actorName! : actorProfile.username)
+            switch notification.type {
+            case "comment_reply":
+                return "\(actor) replied to your comment."
+            case "post_comment":
+                return "\(actor) commented on your post."
+            default:
+                return "\(actor) interacted with your content."
+            }
+        }
+        return notification.bodyText
     }
 }
 

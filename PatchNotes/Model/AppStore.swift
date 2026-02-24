@@ -28,6 +28,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var commentReactionCountsByComment: [UUID: [CommentReactionCount]]
     @Published private(set) var viewerCommentReactionTypeIDsByComment: [UUID: Set<UUID>]
     @Published private(set) var notifications: [AppNotification]
+    @Published private(set) var notificationActorProfilesByID: [UUID: PublicProfile]
     @Published private(set) var notificationsIsLoading: Bool
     @Published private(set) var notificationsErrorMessage: String?
     @Published private(set) var followedGameIDs: Set<Game.ID>
@@ -50,6 +51,7 @@ final class AppStore: ObservableObject {
     private let calendar = Calendar.current
     private let dataProvider: AppDataProviding
     private let feedService = FeedService()
+    private let publicProfileService = PublicProfileService()
     private var hasSubscribed = false
     private var authenticatedSession: Session?
     private var reactionErrorDismissTask: Task<Void, Never>?
@@ -85,6 +87,7 @@ final class AppStore: ObservableObject {
         self.commentReactionCountsByComment = [:]
         self.viewerCommentReactionTypeIDsByComment = [:]
         self.notifications = []
+        self.notificationActorProfilesByID = [:]
         self.notificationsIsLoading = false
         self.notificationsErrorMessage = nil
         self.followedGameIDs = []
@@ -275,6 +278,7 @@ final class AppStore: ObservableObject {
             pendingNotificationsRefreshTask?.cancel()
             pendingNotificationsRefreshTask = nil
             notifications = []
+            notificationActorProfilesByID = [:]
             notificationsErrorMessage = nil
             notificationsIsLoading = false
             followedGameIDs = []
@@ -741,6 +745,7 @@ final class AppStore: ObservableObject {
     func refreshNotifications() async {
         guard let session = authenticatedSession else {
             notifications = []
+            notificationActorProfilesByID = [:]
             notificationsErrorMessage = nil
             notificationsIsLoading = false
             return
@@ -760,7 +765,9 @@ final class AppStore: ObservableObject {
         defer { notificationsIsLoading = false }
 
         do {
-            notifications = try await feedService.fetchNotifications(accessToken: accessToken, limit: 50)
+            let fetched = try await feedService.fetchNotifications(accessToken: accessToken, limit: 50)
+            notifications = fetched
+            await refreshNotificationActorProfiles(for: fetched)
         } catch {
             notificationsErrorMessage = error.localizedDescription
             print("Error loading notifications:", error)
@@ -865,6 +872,10 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func notificationActorProfile(for userID: UUID) -> PublicProfile? {
+        notificationActorProfilesByID[userID]
+    }
+
     func markNotificationRead(_ notificationID: UUID) {
         guard let session = authenticatedSession else { return }
 
@@ -934,6 +945,19 @@ final class AppStore: ObservableObject {
                 self.notifications = previous
                 print("Failed to mark all notifications read:", error)
             }
+        }
+    }
+
+    func resolveNotificationPost(_ notification: AppNotification) async -> Post? {
+        guard let postID = notification.postID else { return nil }
+        if let cached = posts.first(where: { $0.id == postID }) ?? followingPosts.first(where: { $0.id == postID }) {
+            return cached
+        }
+        do {
+            return try await feedService.fetchPost(postID: postID)
+        } catch {
+            print("Failed to resolve notification post:", error)
+            return nil
         }
     }
 
@@ -1012,6 +1036,22 @@ final class AppStore: ObservableObject {
             guard !Task.isCancelled else { return }
             self.pendingNotificationsRefreshTask = nil
             await self.refreshNotifications()
+        }
+    }
+
+    private func refreshNotificationActorProfiles(for notifications: [AppNotification]) async {
+        let actorIDs = notifications.map(\.actorUserID)
+        guard !actorIDs.isEmpty else {
+            notificationActorProfilesByID = [:]
+            return
+        }
+
+        do {
+            let profiles = try await publicProfileService.fetchPublicProfiles(ids: actorIDs)
+            let byID = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
+            notificationActorProfilesByID = byID
+        } catch {
+            print("Failed to load notification actor profiles:", error)
         }
     }
 
@@ -1246,7 +1286,9 @@ final class AppStore: ObservableObject {
     }
 
     private var visibleFeedPostIDs: Set<UUID> {
-        Set(posts.map(\.id)).union(followingPosts.map(\.id))
+        Set(posts.map(\.id))
+            .union(followingPosts.map(\.id))
+            .union(commentsByPost.keys)
     }
 
     private func postID(containingCommentID commentId: UUID) -> UUID? {

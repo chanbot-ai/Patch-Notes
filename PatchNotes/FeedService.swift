@@ -337,7 +337,18 @@ final class FeedService {
             .execute()
 
         let posts = try makeDatabaseDecoder().decode([Post].self, from: response.data)
-        return posts.first
+        if let post = posts.first {
+            return post
+        }
+
+        let fallback = try await client
+            .from("posts")
+            .select("id,title,body,media_url,thumbnail_url,type,created_at")
+            .eq("id", value: postID.uuidString)
+            .limit(1)
+            .execute()
+
+        return try makeDatabaseDecoder().decode([Post].self, from: fallback.data).first
     }
 
     func fetchComments(

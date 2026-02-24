@@ -60,6 +60,10 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
   - follow/unfollow game mutations against `user_followed_games` (with `games` catalog ensure step)
   - release-detail follow/unfollow control
   - post composer optional linked game picker (`posts.game_id`) to seed Following feed content
+- [x] Open-ended roadmap tranche 2:
+  - notification actor profile batch hydration via `public_profiles` (no N+1)
+  - notification inbox row copy upgraded with actor names when available
+  - notification deep-linking into post comments sheet (with fallback post resolution)
 
 ## Parking Lot
 
