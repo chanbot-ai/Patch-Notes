@@ -21,6 +21,7 @@ struct FeedView: View {
     @EnvironmentObject private var store: AppStore
 
     @State private var showingComposer = false
+    @State private var showingNotifications = false
     @State private var selectedCommentsPost: Post?
     @State private var feedScope: FeedScope = .hot
 
@@ -120,6 +121,25 @@ struct FeedView: View {
                 }
                 .accessibilityLabel("Create post")
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingNotifications = true
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "bell")
+                        if store.unreadNotificationsCount > 0 {
+                            Text("\(min(store.unreadNotificationsCount, 99))")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(AppTheme.accent, in: Capsule())
+                                .offset(x: 10, y: -8)
+                        }
+                    }
+                }
+                .accessibilityLabel(store.unreadNotificationsCount > 0 ? "Notifications, \(store.unreadNotificationsCount) unread" : "Notifications")
+            }
         }
         .sheet(isPresented: $showingComposer) {
             NavigationStack {
@@ -137,6 +157,14 @@ struct FeedView: View {
                     .environmentObject(store)
             }
             .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showingNotifications) {
+            NavigationStack {
+                NotificationsInboxView()
+                    .environmentObject(store)
+            }
+            .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
         .refreshable {
@@ -695,6 +723,137 @@ private struct CommentRowCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.white.opacity(isReply ? 0.06 : 0.08), lineWidth: 1)
+        }
+    }
+}
+
+private struct NotificationsInboxView: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            if store.notificationsIsLoading && store.notifications.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView("Loading notifications…")
+                    Spacer()
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
+            if let errorMessage = store.notificationsErrorMessage, store.notifications.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Notifications failed to load")
+                        .font(.headline)
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Retry") {
+                        store.loadNotifications()
+                    }
+                }
+                .foregroundStyle(.red)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
+            if !store.notificationsIsLoading && store.notifications.isEmpty && store.notificationsErrorMessage == nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("No notifications yet")
+                        .font(.headline)
+                    Text("Comments and replies on your posts will show up here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
+            ForEach(store.notifications) { notification in
+                Button {
+                    store.markNotificationRead(notification.id)
+                } label: {
+                    NotificationRow(notification: notification)
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Done") { dismiss() }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if store.unreadNotificationsCount > 0 {
+                    Button("Mark All Read") {
+                        store.markAllNotificationsRead()
+                    }
+                    .font(.footnote.weight(.semibold))
+                }
+            }
+        }
+        .refreshable {
+            await store.refreshNotifications()
+        }
+        .task {
+            if store.notifications.isEmpty && !store.notificationsIsLoading {
+                store.loadNotifications()
+            }
+        }
+    }
+}
+
+private struct NotificationRow: View {
+    let notification: AppNotification
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Circle()
+                .fill(notification.isRead ? Color.white.opacity(0.16) : AppTheme.accent)
+                .frame(width: 10, height: 10)
+                .padding(.top, 5)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(notification.titleText)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(notification.isRead ? 0.78 : 0.95))
+                    if !notification.isRead {
+                        Text("NEW")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.accent)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(AppTheme.accent.opacity(0.12), in: Capsule())
+                    }
+                    Spacer(minLength: 0)
+                    Text(notification.createdAt, style: .relative)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+
+                Text(notification.bodyText)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.62))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(notification.isRead ? 0.03 : 0.06))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(notification.isRead ? Color.white.opacity(0.06) : AppTheme.accent.opacity(0.18), lineWidth: 1)
         }
     }
 }

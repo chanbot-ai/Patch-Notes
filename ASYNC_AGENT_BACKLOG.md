@@ -17,7 +17,7 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
 
 ## In Progress
 
-- [ ] Batch 3 (`%%%`) Advanced social loop: nested reply UI refinement, multi-reaction comment chips, comment sorting polish, notification trigger system (backend+client), architecture stress-test/perf guardrails
+- [ ] Open-ended roadmap execution: propose next feature roadmap toward “Sleeper sports app of video games” vision and begin implementing highest-value item(s) on `codex/async-dev`
 
 ## Done
 
@@ -40,6 +40,15 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
   - pagination UX polish (`load more`, page offsets, cache trim guardrails)
   - animated/collapsible replies UI
   - following feed client wiring (`following_feed_view`, segmented Hot/Following feed in `FeedView`)
+- [x] Batch 3 (`%%%`) Advanced social loop (substantial subset implemented):
+  - notification trigger system backend (`public.notifications`, comment/reply triggers, RLS, grants, realtime publication)
+  - client notifications inbox surface with centralized `AppStore` state + realtime subscription
+  - architecture stress-test/perf guardrails:
+    - coalesced comment realtime refreshes
+    - debounced notifications refresh
+    - in-flight post refresh dedupe
+    - duplicate reaction toggle request guards (post + comment)
+  - nested reply UI refinement / multi-reaction comment chips / comment sorting polish were already largely completed in Batch 2
 
 ## Parking Lot
 

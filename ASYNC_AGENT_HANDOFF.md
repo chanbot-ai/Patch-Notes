@@ -6,18 +6,21 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Batch 2 client social feed enhancements (comment reactions/sort/following feed) implemented on centralized `AppStore`
+- Last milestone: Batch 3 notification loop + realtime/perf guardrails implemented on centralized `AppStore`
 
 ## Latest Milestone
 
 ### Summary
 
-- Implemented Batch 2 client social enhancements on top of the centralized `AppStore` architecture.
-- Added comment reactions (toggle + optimistic) with centralized state, batched reaction-count hydration, and realtime reconciliation via `comment_metrics`.
-- Added comment sort toggle (`Top` / `New`) + paginated comment loading improvements.
-- Added animated/collapsible nested replies UI refinement.
-- Added following feed client wiring (`following_feed_view`) and `Hot`/`Following` scope switch in `FeedView`.
-- Kept feed/comment/reaction ownership centralized in `AppStore` (no per-view duplicated state or subscriptions).
+- Implemented Batch 3 notification loop + guardrails on top of the centralized `AppStore` architecture.
+- Added backend notifications system (`public.notifications`) with comment/reply triggers, RLS, grants, and realtime publication.
+- Added client notifications inbox UI (bell badge + sheet) with centralized `AppStore` state, authenticated fetch/update APIs, and realtime refresh subscription.
+- Added performance/stability guardrails for higher engagement load:
+  - coalesced comment-thread refreshes on `comment_metrics` realtime bursts
+  - debounced notifications refresh on realtime bursts
+  - in-flight post refresh dedupe
+  - duplicate reaction toggle request guards (posts + comments)
+- Kept all feed/comment/reaction/notification ownership centralized in `AppStore` (no per-view subscriptions).
 
 ### Files Touched
 
@@ -25,34 +28,46 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 - `PatchNotes/FeedService.swift`
 - `PatchNotes/Model/AppStore.swift`
 - `PatchNotes/Views/FeedView.swift`
+- `supabase/migrations/20260224063600_create_notifications_system.sql`
 - `ASYNC_AGENT_BACKLOG.md`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
 
-- None in this milestone (uses prior backend-first comment/following migrations)
+- `20260224063600_create_notifications_system.sql`
+  - `public.notifications` table
+  - `create_notifications_for_comment()` trigger function
+  - `comment_insert_notifications_trigger`
+  - owner-only notifications RLS (`SELECT`/`UPDATE`)
+  - authenticated `SELECT, UPDATE` grants
+  - `supabase_realtime` publication registration
 
 ### Verification
 
-- `xcodebuild` simulator build succeeded after Batch 2 client changes (`** BUILD SUCCEEDED **`)
+- `supabase db push` applied notification migration cleanly
+- Live DB verification completed:
+  - `public.notifications` schema, RLS policies, grants
+  - `comment_insert_notifications_trigger` presence
+  - `supabase_realtime` publication includes `public.notifications`
+  - transactional smoke tests confirmed notification insert on comment triggers (rolled back)
+- `xcodebuild` simulator build succeeded after Batch 3 backend/client changes (`** BUILD SUCCEEDED **`)
 - Simulator install + relaunch succeeded (`com.patchnotes.PatchNotes`)
 - Compile/runtime wiring checks covered:
-  - `FeedService` comment sort fetch path (`post_comments_ranked` + `comments`)
-  - batched comment reaction counts + viewer reaction fetches
-  - comment reaction insert/delete APIs
-  - `AppStore` following feed loading + centralized comment reaction state/realtime reconciliation
-  - `FeedView` hot/following segmented feed scope + comment sort toggle + animated reply collapse/expand UI
+  - authenticated notifications fetch/update APIs in `FeedService`
+  - `AppStore` notifications state + realtime subscription + coalesced refresh
+  - in-flight guardrails (post refresh/reaction toggles)
+  - `FeedView` notifications bell badge + inbox sheet
 
 ### Open Risks / Notes
 
-- Comment author display is still anonymous/generic (intentional; no public profile join yet to avoid N+1 fetches).
-- Comment reactions are hydrated in batches for loaded comments, but there is no dedicated comment-reaction error toast yet (failures rollback + feed-level toast fallback).
-- `comment_metrics` realtime subscription is centralized and safe, but event storms may justify debounce/coalescing later if engagement spikes.
-- Following feed currently reuses post reaction state keyed by post ID (good), but UI-specific polish/filter affordances are still minimal.
+- Notification rows currently show generic text (no actor profile join/display yet).
+- Notification inbox taps mark as read but do not deep-link into posts/comments yet.
+- Following feed client wiring exists, but follow/unfollow game management UI is still the next major unlock.
+- Comment author/profile rendering is still generic (intentional to avoid N+1 until view/join strategy is chosen).
 
 ## Next Recommended Action
 
-- Start Batch 3 in the requested order, prioritizing backend/client notification loop closure and stress-test guardrails:
-  - notification trigger system (backend + client subscription + basic inbox surface)
-  - comment sorting/multi-reaction polish refinements (where gaps remain)
-  - architecture stress-test/perf guardrails (cache limits, reconciliation throttling, duplicate optimistic write defenses)
+- Start open-ended roadmap execution toward “Sleeper sports app of video games” vision:
+  - prioritize follow/unfollow game management UI + backend syncing (unlocks usable Following feed)
+  - then add notification deep-linking and actor profile display
+  - then profile/public identity joins for posts/comments without N+1 fetches

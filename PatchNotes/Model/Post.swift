@@ -70,3 +70,43 @@ struct CommentReactionCount: Identifiable, Decodable, Equatable {
     var commentID: UUID { comment_id }
     var reactionTypeID: UUID { reaction_type_id }
 }
+
+struct AppNotification: Identifiable, Decodable, Equatable {
+    let id: UUID
+    let user_id: UUID
+    let actor_user_id: UUID
+    let post_id: UUID?
+    let comment_id: UUID?
+    let type: String
+    let created_at: Date
+    let read: Bool
+
+    var userID: UUID { user_id }
+    var actorUserID: UUID { actor_user_id }
+    var postID: UUID? { post_id }
+    var commentID: UUID? { comment_id }
+    var createdAt: Date { created_at }
+    var isRead: Bool { read }
+
+    var titleText: String {
+        switch type {
+        case "comment_reply":
+            return "New reply"
+        case "post_comment":
+            return "New comment"
+        default:
+            return "New activity"
+        }
+    }
+
+    var bodyText: String {
+        switch type {
+        case "comment_reply":
+            return "Someone replied to your comment."
+        case "post_comment":
+            return "Someone commented on your post."
+        default:
+            return "There’s new activity on your feed."
+        }
+    }
+}

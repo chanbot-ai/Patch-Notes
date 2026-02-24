@@ -37,13 +37,21 @@ final class FeedService {
         let reaction_type_id: UUID
     }
 
+    private struct NotificationReadUpdatePayload: Encodable {
+        let read: Bool
+    }
+
     private let client = SupabaseManager.shared.client
     private var postMetricsChannel: RealtimeChannelV2?
     private var postMetricsSubscription: RealtimeSubscription?
     private var commentMetricsChannel: RealtimeChannelV2?
     private var commentMetricsSubscription: RealtimeSubscription?
+    private var notificationsRealtimeClient: SupabaseClient?
+    private var notificationsChannel: RealtimeChannelV2?
+    private var notificationsSubscription: RealtimeSubscription?
     var onPostMetricsChange: (@MainActor @Sendable (UUID?) -> Void)?
     var onCommentMetricsChange: (@MainActor @Sendable (UUID?) -> Void)?
+    var onNotificationsChange: (@MainActor @Sendable () -> Void)?
     private static let iso8601WithFractionalSeconds: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -147,6 +155,51 @@ final class FeedService {
         }
     }
 
+    func subscribeToNotifications(
+        accessToken: String,
+        onChange: @escaping @MainActor @Sendable () -> Void
+    ) {
+        onNotificationsChange = onChange
+        subscribeToNotifications(accessToken: accessToken)
+    }
+
+    func subscribeToNotifications(accessToken: String) {
+        guard notificationsChannel == nil else { return }
+
+        let realtimeClient = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        let channel = realtimeClient.channel("public:notifications")
+        let onNotificationsChange = onNotificationsChange
+        let subscription = channel.onPostgresChange(
+            AnyAction.self,
+            schema: "public",
+            table: "notifications"
+        ) { _ in
+            Task { @MainActor in
+                onNotificationsChange?()
+            }
+        }
+
+        notificationsRealtimeClient = realtimeClient
+        notificationsChannel = channel
+        notificationsSubscription = subscription
+
+        Task {
+            do {
+                try await channel.subscribeWithError()
+                print("Subscribed to notifications realtime updates")
+            } catch {
+                print("Notifications realtime subscription error:", error)
+            }
+        }
+    }
+
+    func resetNotificationsSubscription() {
+        notificationsSubscription = nil
+        notificationsChannel = nil
+        notificationsRealtimeClient = nil
+        onNotificationsChange = nil
+    }
+
     func fetchHotFeed() async throws -> [Post] {
         let response = try await client
             .from("hot_feed_view")
@@ -237,6 +290,42 @@ final class FeedService {
             .execute()
 
         return try JSONDecoder().decode([ReactionType].self, from: response.data)
+    }
+
+    func fetchNotifications(
+        accessToken: String,
+        limit: Int = 50
+    ) async throws -> [AppNotification] {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        let response = try await client
+            .from("notifications")
+            .select("id,user_id,actor_user_id,post_id,comment_id,type,created_at,read")
+            .order("created_at", ascending: false)
+            .limit(limit)
+            .execute()
+
+        return try makeDatabaseDecoder().decode([AppNotification].self, from: response.data)
+    }
+
+    func markNotificationRead(
+        id: UUID,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await client
+            .from("notifications")
+            .update(NotificationReadUpdatePayload(read: true))
+            .eq("id", value: id.uuidString)
+            .execute()
+    }
+
+    func markAllNotificationsRead(accessToken: String) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await client
+            .from("notifications")
+            .update(NotificationReadUpdatePayload(read: true))
+            .eq("read", value: false)
+            .execute()
     }
 
     func fetchReactionCounts(postID: UUID) async throws -> [PostReactionCount] {

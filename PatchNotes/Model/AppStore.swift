@@ -27,6 +27,9 @@ final class AppStore: ObservableObject {
     @Published private(set) var commentSortByPost: [UUID: CommentSortMode]
     @Published private(set) var commentReactionCountsByComment: [UUID: [CommentReactionCount]]
     @Published private(set) var viewerCommentReactionTypeIDsByComment: [UUID: Set<UUID>]
+    @Published private(set) var notifications: [AppNotification]
+    @Published private(set) var notificationsIsLoading: Bool
+    @Published private(set) var notificationsErrorMessage: String?
     @Published private(set) var feedIsLoading: Bool
     @Published private(set) var feedErrorMessage: String?
     @Published private(set) var followingPosts: [Post]
@@ -48,9 +51,16 @@ final class AppStore: ObservableObject {
     private var authenticatedSession: Session?
     private var reactionErrorDismissTask: Task<Void, Never>?
     private var hasSubscribedToCommentMetrics = false
+    private var hasSubscribedToNotifications = false
     private var commentOffsetsByPost: [UUID: Int]
     private let commentPageSize = 20
     private let maxCachedCommentsPerPost = 100
+    private var inFlightPostRefreshIDs: Set<UUID>
+    private var inFlightPostReactionKeys: Set<String>
+    private var inFlightCommentReactionKeys: Set<String>
+    private var pendingCommentRealtimePostIDs: Set<UUID>
+    private var pendingCommentRealtimeRefreshTask: Task<Void, Never>?
+    private var pendingNotificationsRefreshTask: Task<Void, Never>?
 
     init(
         dataProvider: AppDataProviding = MockAppDataProvider(),
@@ -70,6 +80,9 @@ final class AppStore: ObservableObject {
         self.commentSortByPost = [:]
         self.commentReactionCountsByComment = [:]
         self.viewerCommentReactionTypeIDsByComment = [:]
+        self.notifications = []
+        self.notificationsIsLoading = false
+        self.notificationsErrorMessage = nil
         self.feedIsLoading = false
         self.feedErrorMessage = nil
         self.followingPosts = []
@@ -84,6 +97,10 @@ final class AppStore: ObservableObject {
         self.esportsMarkets = []
         self.threadsByGame = [:]
         self.commentOffsetsByPost = [:]
+        self.inFlightPostRefreshIDs = []
+        self.inFlightPostReactionKeys = []
+        self.inFlightCommentReactionKeys = []
+        self.pendingCommentRealtimePostIDs = []
         refresh(referenceDate: referenceDate)
         configureFeedOwnership()
     }
@@ -172,13 +189,30 @@ final class AppStore: ObservableObject {
         loadReactionTypes()
         subscribeToFeedRealtime()
         subscribeToCommentMetricsRealtime()
+        subscribeToNotificationsRealtime()
         if posts.isEmpty && !feedIsLoading {
             loadHotFeed()
+        }
+        if authenticatedSession != nil, notifications.isEmpty && !notificationsIsLoading {
+            loadNotifications()
         }
     }
 
     func setAuthenticatedSession(_ session: Session?) {
+        let previousUserID = authenticatedSession?.user.id
         authenticatedSession = session
+        let newUserID = session?.user.id
+
+        if previousUserID != newUserID {
+            hasSubscribedToNotifications = false
+            feedService.resetNotificationsSubscription()
+            pendingNotificationsRefreshTask?.cancel()
+            pendingNotificationsRefreshTask = nil
+            notifications = []
+            notificationsErrorMessage = nil
+            notificationsIsLoading = false
+        }
+
         if session == nil {
             viewerReactionTypeIDsByPost = [:]
             viewerCommentReactionTypeIDsByComment = [:]
@@ -192,6 +226,14 @@ final class AppStore: ObservableObject {
             reactionErrorMessage = nil
             followingPosts = []
             followingFeedErrorMessage = nil
+            inFlightPostReactionKeys = []
+            inFlightCommentReactionKeys = []
+            inFlightPostRefreshIDs = []
+            pendingCommentRealtimePostIDs = []
+            pendingCommentRealtimeRefreshTask?.cancel()
+            pendingCommentRealtimeRefreshTask = nil
+            pendingNotificationsRefreshTask?.cancel()
+            pendingNotificationsRefreshTask = nil
         }
     }
 
@@ -210,6 +252,12 @@ final class AppStore: ObservableObject {
     func loadFollowingFeed() {
         Task {
             await refreshFollowingFeed()
+        }
+    }
+
+    func loadNotifications() {
+        Task {
+            await refreshNotifications()
         }
     }
 
@@ -345,6 +393,10 @@ final class AppStore: ObservableObject {
             return
         }
 
+        let operationKey = "\(commentId.uuidString)|\(reactionTypeId.uuidString)"
+        guard !inFlightCommentReactionKeys.contains(operationKey) else { return }
+        inFlightCommentReactionKeys.insert(operationKey)
+
         let userId = session.user.id
         let currentlySelected = viewerCommentReactionTypeIDsByComment[commentId, default: []].contains(reactionTypeId)
         let previousCounts = commentReactionCountsByComment[commentId] ?? []
@@ -358,6 +410,7 @@ final class AppStore: ObservableObject {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
+            defer { self.inFlightCommentReactionKeys.remove(operationKey) }
             do {
                 if currentlySelected {
                     try await self.feedService.removeCommentReaction(
@@ -412,9 +465,23 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func subscribeToNotificationsRealtime() {
+        guard !hasSubscribedToNotifications else { return }
+        guard let session = authenticatedSession else { return }
+
+        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else { return }
+
+        hasSubscribedToNotifications = true
+        feedService.subscribeToNotifications(accessToken: accessToken) { [weak self] in
+            self?.scheduleNotificationsRefresh()
+        }
+    }
+
     func refreshHotFeed() async {
         subscribeToFeedRealtime()
         subscribeToCommentMetricsRealtime()
+        subscribeToNotificationsRealtime()
         feedIsLoading = true
         feedErrorMessage = nil
         defer { feedIsLoading = false }
@@ -449,6 +516,7 @@ final class AppStore: ObservableObject {
 
         subscribeToFeedRealtime()
         subscribeToCommentMetricsRealtime()
+        subscribeToNotificationsRealtime()
         followingFeedIsLoading = true
         followingFeedErrorMessage = nil
         defer { followingFeedIsLoading = false }
@@ -465,6 +533,9 @@ final class AppStore: ObservableObject {
     }
 
     func refreshPost(postId: UUID) async {
+        guard !inFlightPostRefreshIDs.contains(postId) else { return }
+        inFlightPostRefreshIDs.insert(postId)
+        defer { inFlightPostRefreshIDs.remove(postId) }
         do {
             guard let updated = try await feedService.fetchPost(postID: postId) else {
                 if let index = posts.firstIndex(where: { $0.id == postId }) {
@@ -560,6 +631,35 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func refreshNotifications() async {
+        guard let session = authenticatedSession else {
+            notifications = []
+            notificationsErrorMessage = nil
+            notificationsIsLoading = false
+            return
+        }
+
+        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else {
+            notifications = []
+            notificationsErrorMessage = "Session expired"
+            notificationsIsLoading = false
+            return
+        }
+
+        subscribeToNotificationsRealtime()
+        notificationsIsLoading = true
+        notificationsErrorMessage = nil
+        defer { notificationsIsLoading = false }
+
+        do {
+            notifications = try await feedService.fetchNotifications(accessToken: accessToken, limit: 50)
+        } catch {
+            notificationsErrorMessage = error.localizedDescription
+            print("Error loading notifications:", error)
+        }
+    }
+
     func react(to postId: UUID, with reactionTypeId: UUID) {
         guard let session = authenticatedSession else {
             showReactionError("Sign in again to add reactions.")
@@ -572,6 +672,9 @@ final class AppStore: ObservableObject {
         }
 
         let userId = session.user.id
+        let operationKey = "\(postId.uuidString)|\(reactionTypeId.uuidString)"
+        guard !inFlightPostReactionKeys.contains(operationKey) else { return }
+        inFlightPostReactionKeys.insert(operationKey)
         let currentlySelected = viewerReactionTypeIDsByPost[postId, default: []].contains(reactionTypeId)
         let previousCounts = reactionCountsByPost[postId] ?? []
         let previousSelected = viewerReactionTypeIDsByPost[postId] ?? []
@@ -585,6 +688,7 @@ final class AppStore: ObservableObject {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
+            defer { self.inFlightPostReactionKeys.remove(operationKey) }
             do {
                 if currentlySelected {
                     try await self.feedService.removeReaction(
@@ -648,6 +752,84 @@ final class AppStore: ObservableObject {
         commentsByPost[postId] ?? []
     }
 
+    var unreadNotificationsCount: Int {
+        notifications.reduce(into: 0) { count, item in
+            if !item.isRead { count += 1 }
+        }
+    }
+
+    func markNotificationRead(_ notificationID: UUID) {
+        guard let session = authenticatedSession else { return }
+
+        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else { return }
+
+        guard let index = notifications.firstIndex(where: { $0.id == notificationID }) else { return }
+        guard notifications[index].isRead == false else { return }
+
+        let previous = notifications[index]
+        var next = notifications
+        next[index] = AppNotification(
+            id: previous.id,
+            user_id: previous.user_id,
+            actor_user_id: previous.actor_user_id,
+            post_id: previous.post_id,
+            comment_id: previous.comment_id,
+            type: previous.type,
+            created_at: previous.created_at,
+            read: true
+        )
+        notifications = next
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.feedService.markNotificationRead(id: notificationID, accessToken: accessToken)
+            } catch {
+                if let rollbackIndex = self.notifications.firstIndex(where: { $0.id == notificationID }) {
+                    var rollback = self.notifications
+                    rollback[rollbackIndex] = previous
+                    self.notifications = rollback
+                }
+                print("Failed to mark notification read:", error)
+            }
+        }
+    }
+
+    func markAllNotificationsRead() {
+        guard let session = authenticatedSession else { return }
+
+        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else { return }
+
+        let previous = notifications
+        guard previous.contains(where: { !$0.isRead }) else { return }
+
+        notifications = previous.map { item in
+            guard item.isRead == false else { return item }
+            return AppNotification(
+                id: item.id,
+                user_id: item.user_id,
+                actor_user_id: item.actor_user_id,
+                post_id: item.post_id,
+                comment_id: item.comment_id,
+                type: item.type,
+                created_at: item.created_at,
+                read: true
+            )
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.feedService.markAllNotificationsRead(accessToken: accessToken)
+            } catch {
+                self.notifications = previous
+                print("Failed to mark all notifications read:", error)
+            }
+        }
+    }
+
     private func configureFeedOwnership() {
         // reserved for future centralized store wiring (e.g., notifications/analytics hooks)
     }
@@ -694,11 +876,35 @@ final class AppStore: ObservableObject {
     private func handleCommentMetricsRealtime(commentId: UUID) async {
         guard let postId = postID(containingCommentID: commentId) else { return }
         await refreshCommentReactionState(for: [commentId])
-        if commentSortMode(for: postId) == .top {
-            await refreshLoadedComments(for: postId)
-        } else if commentsByPost[postId] != nil {
-            // Newest sort only needs count sync, not reorder.
-            await refreshLoadedComments(for: postId)
+        scheduleCommentThreadRefresh(for: postId)
+    }
+
+    private func scheduleCommentThreadRefresh(for postId: UUID) {
+        guard commentsByPost[postId] != nil else { return }
+        pendingCommentRealtimePostIDs.insert(postId)
+        guard pendingCommentRealtimeRefreshTask == nil else { return }
+
+        pendingCommentRealtimeRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            let postIDs = Array(self.pendingCommentRealtimePostIDs)
+            self.pendingCommentRealtimePostIDs.removeAll()
+            self.pendingCommentRealtimeRefreshTask = nil
+            for postID in postIDs {
+                await self.refreshLoadedComments(for: postID)
+            }
+        }
+    }
+
+    private func scheduleNotificationsRefresh() {
+        guard authenticatedSession != nil else { return }
+        pendingNotificationsRefreshTask?.cancel()
+        pendingNotificationsRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            self.pendingNotificationsRefreshTask = nil
+            await self.refreshNotifications()
         }
     }
 
