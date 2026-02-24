@@ -13,9 +13,26 @@ struct Post: Identifiable, Decodable {
     let reaction_count: Int?
     let comment_count: Int?
     let hot_score: Double?
+    let author_username: String?
+    let author_display_name: String?
+    let author_avatar_url: String?
+    let author_created_at: Date?
 
     var authorID: UUID? { author_id }
     var gameID: UUID? { game_id }
+
+    var authorProfile: PublicProfile? {
+        guard let authorID,
+              let author_username,
+              let author_created_at else { return nil }
+        return PublicProfile(
+            id: authorID,
+            username: author_username,
+            display_name: author_display_name,
+            avatar_url: author_avatar_url,
+            created_at: author_created_at
+        )
+    }
 }
 
 struct ReactionType: Identifiable, Decodable, Equatable {
@@ -45,10 +62,26 @@ struct Comment: Identifiable, Decodable, Equatable {
     let created_at: Date
     let reaction_count: Int?
     let hot_score: Double?
+    let author_username: String?
+    let author_display_name: String?
+    let author_avatar_url: String?
+    let author_created_at: Date?
 
     var postID: UUID { post_id }
     var userID: UUID { user_id }
     var parentCommentID: UUID? { parent_comment_id }
+
+    var authorProfile: PublicProfile? {
+        guard let author_username,
+              let author_created_at else { return nil }
+        return PublicProfile(
+            id: user_id,
+            username: author_username,
+            display_name: author_display_name,
+            avatar_url: author_avatar_url,
+            created_at: author_created_at
+        )
+    }
 }
 
 enum CommentSortMode: String, CaseIterable, Identifiable {

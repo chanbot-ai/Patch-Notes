@@ -583,6 +583,7 @@ final class AppStore: ObservableObject {
 
         do {
             let fetchedPosts = try await feedService.fetchHotFeed()
+            cachePublicProfiles(from: fetchedPosts)
             await refreshPublicProfiles(for: fetchedPosts.compactMap(\.authorID))
             await hydrateGameCatalog(for: fetchedPosts)
             applyHotFeedPosts(fetchedPosts, animated: false)
@@ -620,6 +621,7 @@ final class AppStore: ObservableObject {
 
         do {
             let fetched = try await feedService.fetchFollowingFeed(accessToken: accessToken)
+            cachePublicProfiles(from: fetched)
             await refreshPublicProfiles(for: fetched.compactMap(\.authorID))
             await hydrateGameCatalog(for: fetched)
             followingPosts = fetched.sorted(by: Self.sortPosts)
@@ -756,6 +758,7 @@ final class AppStore: ObservableObject {
                     // No full-feed realtime refetch here; manual refresh/load can reconcile membership.
                 }
             }
+            cachePublicProfiles(from: [updated])
             if let authorID = updated.authorID {
                 await refreshPublicProfiles(for: [authorID])
             }
@@ -1102,6 +1105,16 @@ final class AppStore: ObservableObject {
         publicProfilesByID = next
     }
 
+    private func cachePublicProfiles(from posts: [Post]) {
+        let profiles = posts.compactMap(\.authorProfile)
+        cachePublicProfiles(profiles)
+    }
+
+    private func cachePublicProfiles(from comments: [Comment]) {
+        let profiles = comments.compactMap(\.authorProfile)
+        cachePublicProfiles(profiles)
+    }
+
     private func hydrateGameCatalog(for posts: [Post]) async {
         let gameIDs = Set(posts.compactMap(\.gameID))
         guard !gameIDs.isEmpty else { return }
@@ -1183,6 +1196,7 @@ final class AppStore: ObservableObject {
             commentHasMoreByPost = nextHasMore
 
             await refreshCommentReactionState(for: trimmed.map(\.id))
+            cachePublicProfiles(from: trimmed)
             await refreshPublicProfiles(for: trimmed.map(\.userID))
         } catch {
             var latestErrors = commentLoadErrorByPost

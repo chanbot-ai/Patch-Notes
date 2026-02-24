@@ -6,35 +6,37 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Notification inbox polish (read/unread filter + recency grouping)
+- Last milestone: Profile-joined feed/comment views + client cache hydration
 
 ## Latest Milestone
 
 ### Summary
 
-- Added read/unread segmented filter in the notifications inbox.
-- Grouped notifications into Today / Yesterday / This Week / Earlier sections.
-- Provided empty-state copy for the unread filter.
+- Added profile-joined feed/comment views (plus `post_comments_recent`) so feed/comment queries can return author profile fields in one call.
+- Extended Post/Comment models to decode author profile columns and hydrated the public profile cache from fetched posts/comments.
+- Switched comment “New” fetches to `post_comments_recent` to keep profile fields consistent across sorts.
 
 ### Files Touched
 
-- `PatchNotes/Views/FeedView.swift`
+- `PatchNotes/FeedService.swift`
+- `PatchNotes/Model/AppStore.swift`
+- `PatchNotes/Model/Post.swift`
+- `supabase/migrations/20260224121000_add_profile_columns_to_feed_views.sql`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
 
-- None
+- `supabase/migrations/20260224121000_add_profile_columns_to_feed_views.sql` (not applied in this environment)
 
 ### Verification
 
-- `xcodebuild -scheme PatchNotes -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build` failed (CoreSimulator connection invalid; SwiftPM/ModuleCache access denied in sandbox).
+- `xcodebuild -scheme PatchNotes -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build` failed (CoreSimulator connection invalid; ModuleCache/SwiftPM access denied in sandbox).
 
 ### Open Risks / Notes
 
-- Filtering happens client-side on the last 50 notifications; no server-side read/unread query yet.
+- Supabase migration still needs to be applied in a real environment.
+- If author profiles are missing from `public_profiles`, client still falls back to the batched profile fetch.
 
 ## Next Recommended Action
 
-- Continue open-ended roadmap execution (priority order):
-  1. Release Calendar polish tied to follow/watch state and social activity
-  2. Social composer/media enrichment (media uploads + richer post types)
+- Apply the new Supabase migration, then rerun the iOS build in a full Xcode environment.
