@@ -384,6 +384,25 @@ private struct ReleaseCard: View {
                     Spacer()
 
                     Button {
+                        store.toggleFollowedGame(game)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: store.isFollowingGame(game) ? "dot.radiowaves.left.and.right" : "plus.circle")
+                            Text(store.isFollowingGame(game) ? "Following" : "Follow")
+                        }
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(
+                            store.isFollowingGame(game) ? AppTheme.accent.opacity(0.20) : Color.white.opacity(0.09),
+                            in: Capsule()
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(store.isFollowingGame(game) ? "Unfollow game" : "Follow game")
+
+                    Button {
                         store.toggleFavorite(game)
                     } label: {
                         HStack(spacing: 6) {

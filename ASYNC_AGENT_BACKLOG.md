@@ -64,6 +64,9 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
   - notification actor profile batch hydration via `public_profiles` (no N+1)
   - notification inbox row copy upgraded with actor names when available
   - notification deep-linking into post comments sheet (with fallback post resolution)
+- [x] Open-ended roadmap tranche 3:
+  - hardened `public.games` access model (RLS + grants + policies) to support app-side catalog sync safely
+  - surfaced follow/unfollow actions on Release Calendar cards (not just release detail)
 
 ## Parking Lot
 

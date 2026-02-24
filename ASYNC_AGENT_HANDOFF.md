@@ -6,52 +6,52 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Roadmap tranche 2 (notification deep-linking + actor names) after Following-feed activation tranche
+- Last milestone: Roadmap tranche 3 (games-table hardening + broader follow controls)
 
 ## Latest Milestone
 
 ### Summary
 
-- Continued the open-ended roadmap with notification UX loop-closure improvements.
-- Notification inbox now batch-hydrates actor profiles via `public_profiles` (no per-row/N+1 fetches).
-- Notification rows display actor names when available instead of generic-only copy.
-- Tapping a notification now marks it read, dismisses the inbox, and deep-links into the related post’s comments sheet when the post is resolvable.
-- Added fallback post resolution for notifications (`FeedService.fetchPost` falls back from `hot_feed_view` to raw `posts`), improving deep-link reliability for low-ranked posts.
+- Continued the open-ended roadmap with backend hardening + follow-surface expansion.
+- Added a migration to harden `public.games` (RLS enabled, explicit `SELECT`/`INSERT`/`UPDATE` policy set, legacy broad grants removed).
+- Verified `public.games` now has only the intended privileges:
+  - `anon`: `SELECT`
+  - `authenticated`: `SELECT`, `INSERT`, `UPDATE`
+- Added follow/unfollow controls directly to Release Calendar cards (in addition to Release Detail), reducing friction for populating the Following feed.
 
 ### Files Touched
 
-- `PatchNotes/PublicProfileService.swift`
-- `PatchNotes/FeedService.swift`
-- `PatchNotes/Model/AppStore.swift`
-- `PatchNotes/Views/FeedView.swift`
+- `PatchNotes/Views/ReleaseCalendarView.swift`
+- `supabase/migrations/20260224065610_harden_games_table_access.sql`
 - `ASYNC_AGENT_BACKLOG.md`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
 
-- None in this milestone (uses existing `games` / `user_followed_games` schema + policies)
+- `20260224065610_harden_games_table_access.sql`
+  - enables RLS on `public.games`
+  - adds explicit `SELECT` (public) and `INSERT`/`UPDATE` (authenticated) policies
+  - tightens `anon`/`authenticated` grants to remove legacy broad privileges
 
 ### Verification
 
-- `xcodebuild` simulator build succeeded after roadmap tranche changes (`** BUILD SUCCEEDED **`)
-- Simulator install + relaunch succeeded (`com.patchnotes.PatchNotes`)
-- Compile/runtime wiring checks covered:
-  - `PublicProfileService` batched profile fetch by IDs (`public_profiles`)
-  - notification actor-profile cache in `AppStore`
-  - notification deep-link flow (`FeedView` inbox -> comments sheet)
-  - `FeedService.fetchPost` fallback path (`hot_feed_view` -> `posts`)
+- `supabase db push` applied `games` hardening migration cleanly
+- Live DB verification completed for `public.games`:
+  - RLS enabled
+  - policies present (public `SELECT`, authenticated `INSERT`/`UPDATE`)
+  - grants reduced to intended surface
+- `xcodebuild` simulator build succeeded after Release Calendar follow UI patch (`** BUILD SUCCEEDED **`)
 
 ### Open Risks / Notes
 
-- `games` table is currently permissive (legacy grants / no explicit RLS); current follow/composer game sync uses it as-is for velocity, but hardening is recommended before production.
 - Notification deep-links rely on resolving a `Post`; if the referenced post is unavailable (deleted/inaccessible), the tap currently just marks read and stays in the inbox.
-- Follow controls are still only surfaced in Release Detail (not yet across calendar cards / My Games rows).
+- Follow controls now exist on Release Detail + Release Calendar cards, but not yet in My Games rows / profile surfaces.
 - Following feed usefulness still depends on posts having `game_id`; composer now supports this, but older posts remain unlinked.
 
 ## Next Recommended Action
 
 - Continue open-ended roadmap execution (priority order):
-  1. Harden `games` table access model (RLS/grants) now that app writes to it
-  2. Surface follow/unfollow controls across more game surfaces + show followed badges in feed/composer
-  3. Public profile joins/views for posts/comments (no N+1 author fetches)
-  4. Feed rows/post detail: show linked game chips and jump-to-game context
+  1. Surface follow/unfollow controls across more game surfaces + show followed badges in feed/composer
+  2. Public profile joins/views for posts/comments (no N+1 author fetches)
+  3. Feed rows/post detail: show linked game chips and jump-to-game context
+  4. Notification inbox polish (read/unread filters, grouped by recency)
