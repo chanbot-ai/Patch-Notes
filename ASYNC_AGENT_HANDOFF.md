@@ -6,20 +6,18 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Roadmap tranche 6 (linked game chips for feed + detail)
+- Last milestone: Notification inbox polish (read/unread filter + recency grouping)
 
 ## Latest Milestone
 
 ### Summary
 
-- Added batched game catalog hydration for post-linked game IDs.
-- Displayed linked game chips in feed rows and post detail headers with navigation to game detail.
-- Reused the existing game detail surface for feed-linked game context.
+- Added read/unread segmented filter in the notifications inbox.
+- Grouped notifications into Today / Yesterday / This Week / Earlier sections.
+- Provided empty-state copy for the unread filter.
 
 ### Files Touched
 
-- `PatchNotes/FeedService.swift`
-- `PatchNotes/Model/AppStore.swift`
 - `PatchNotes/Views/FeedView.swift`
 - `ASYNC_AGENT_HANDOFF.md`
 
@@ -29,15 +27,14 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 ### Verification
 
-- `xcodebuild -scheme PatchNotes -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build` failed (CoreSimulator connection invalid; SwiftPM cache access denied).
+- `xcodebuild -scheme PatchNotes -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build` failed (CoreSimulator connection invalid; SwiftPM/ModuleCache access denied in sandbox).
 
 ### Open Risks / Notes
 
-- Public profile display depends on `public_profiles` view; posts/comments from users without completed profiles may show no author label.
+- Filtering happens client-side on the last 50 notifications; no server-side read/unread query yet.
 
 ## Next Recommended Action
 
 - Continue open-ended roadmap execution (priority order):
-  1. Notification inbox polish (read/unread filters, grouped by recency)
-  2. Release Calendar polish tied to follow/watch state and social activity
-  3. Social composer/media enrichment (media uploads + richer post types)
+  1. Release Calendar polish tied to follow/watch state and social activity
+  2. Social composer/media enrichment (media uploads + richer post types)
