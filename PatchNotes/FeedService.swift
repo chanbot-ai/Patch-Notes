@@ -343,7 +343,7 @@ final class FeedService {
 
         let fallback = try await client
             .from("posts")
-            .select("id,title,body,media_url,thumbnail_url,type,created_at")
+            .select("id,author_id,game_id,title,body,media_url,thumbnail_url,type,created_at")
             .eq("id", value: postID.uuidString)
             .limit(1)
             .execute()

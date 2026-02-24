@@ -2,6 +2,8 @@ import Foundation
 
 struct Post: Identifiable, Decodable {
     let id: UUID
+    let author_id: UUID?
+    let game_id: UUID?
     let title: String?
     let body: String?
     let media_url: String?
@@ -11,6 +13,9 @@ struct Post: Identifiable, Decodable {
     let reaction_count: Int?
     let comment_count: Int?
     let hot_score: Double?
+
+    var authorID: UUID? { author_id }
+    var gameID: UUID? { game_id }
 }
 
 struct ReactionType: Identifiable, Decodable, Equatable {

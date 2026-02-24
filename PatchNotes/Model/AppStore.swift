@@ -29,6 +29,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var viewerCommentReactionTypeIDsByComment: [UUID: Set<UUID>]
     @Published private(set) var notifications: [AppNotification]
     @Published private(set) var notificationActorProfilesByID: [UUID: PublicProfile]
+    @Published private(set) var publicProfilesByID: [UUID: PublicProfile]
     @Published private(set) var notificationsIsLoading: Bool
     @Published private(set) var notificationsErrorMessage: String?
     @Published private(set) var followedGameIDs: Set<Game.ID>
@@ -88,6 +89,7 @@ final class AppStore: ObservableObject {
         self.viewerCommentReactionTypeIDsByComment = [:]
         self.notifications = []
         self.notificationActorProfilesByID = [:]
+        self.publicProfilesByID = [:]
         self.notificationsIsLoading = false
         self.notificationsErrorMessage = nil
         self.followedGameIDs = []
@@ -417,6 +419,9 @@ final class AppStore: ObservableObject {
         )
 
         applyOptimisticCommentInsert(tempComment)
+        Task { @MainActor [weak self] in
+            await self?.refreshPublicProfiles(for: [userId])
+        }
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -568,6 +573,7 @@ final class AppStore: ObservableObject {
 
         do {
             let fetchedPosts = try await feedService.fetchHotFeed()
+            await refreshPublicProfiles(for: fetchedPosts.compactMap(\.authorID))
             applyHotFeedPosts(fetchedPosts, animated: false)
             let postIDs = fetchedPosts.map(\.id)
             Task { @MainActor [weak self] in
@@ -603,6 +609,7 @@ final class AppStore: ObservableObject {
 
         do {
             let fetched = try await feedService.fetchFollowingFeed(accessToken: accessToken)
+            await refreshPublicProfiles(for: fetched.compactMap(\.authorID))
             followingPosts = fetched.sorted(by: Self.sortPosts)
             let postIDs = fetched.map(\.id)
             await refreshReactionState(for: postIDs)
@@ -736,6 +743,9 @@ final class AppStore: ObservableObject {
                 } else {
                     // No full-feed realtime refetch here; manual refresh/load can reconcile membership.
                 }
+            }
+            if let authorID = updated.authorID {
+                await refreshPublicProfiles(for: [authorID])
             }
         } catch {
             print("Failed to refresh post:", error)
@@ -874,6 +884,11 @@ final class AppStore: ObservableObject {
 
     func notificationActorProfile(for userID: UUID) -> PublicProfile? {
         notificationActorProfilesByID[userID]
+    }
+
+    func publicProfile(for userID: UUID?) -> PublicProfile? {
+        guard let userID else { return nil }
+        return publicProfilesByID[userID]
     }
 
     func markNotificationRead(_ notificationID: UUID) {
@@ -1046,13 +1061,32 @@ final class AppStore: ObservableObject {
             return
         }
 
+        await refreshPublicProfiles(for: actorIDs)
+        let actorSet = Set(actorIDs)
+        notificationActorProfilesByID = publicProfilesByID.filter { actorSet.contains($0.key) }
+    }
+
+    private func refreshPublicProfiles(for userIDs: [UUID]) async {
+        let uniqueIDs = Array(Set(userIDs))
+        guard !uniqueIDs.isEmpty else { return }
+        let missing = uniqueIDs.filter { publicProfilesByID[$0] == nil }
+        guard !missing.isEmpty else { return }
+
         do {
-            let profiles = try await publicProfileService.fetchPublicProfiles(ids: actorIDs)
-            let byID = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
-            notificationActorProfilesByID = byID
+            let profiles = try await publicProfileService.fetchPublicProfiles(ids: missing)
+            cachePublicProfiles(profiles)
         } catch {
-            print("Failed to load notification actor profiles:", error)
+            print("Failed to load public profiles:", error)
         }
+    }
+
+    private func cachePublicProfiles(_ profiles: [PublicProfile]) {
+        guard !profiles.isEmpty else { return }
+        var next = publicProfilesByID
+        for profile in profiles {
+            next[profile.id] = profile
+        }
+        publicProfilesByID = next
     }
 
     private func fetchCommentsPage(
@@ -1113,6 +1147,7 @@ final class AppStore: ObservableObject {
             commentHasMoreByPost = nextHasMore
 
             await refreshCommentReactionState(for: trimmed.map(\.id))
+            await refreshPublicProfiles(for: trimmed.map(\.userID))
         } catch {
             var latestErrors = commentLoadErrorByPost
             latestErrors[postId] = error.localizedDescription

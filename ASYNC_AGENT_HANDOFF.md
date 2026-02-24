@@ -6,20 +6,21 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Roadmap tranche 4 (follow controls + badges in My Games/social/composer)
+- Last milestone: Roadmap tranche 5 (public profile hydration for posts/comments)
 
 ## Latest Milestone
 
 ### Summary
 
-- Expanded follow/unfollow controls to My Games surfaces and added followed badges in Social + composer.
-- Added inline follow pills on Owned and Favorited tiles/rows, plus follow status badges on owned tiles.
-- Added followed indicator to Social game chips and composer game picker labels.
+- Added batched public profile hydration for post/comment authors and reused it for notifications.
+- Wired author display in feed rows, comment cards, and post detail headers.
+- Extended Post model to decode author/game IDs from feed views.
 
 ### Files Touched
 
-- `PatchNotes/Views/MyGamesView.swift`
-- `PatchNotes/Views/SocialView.swift`
+- `PatchNotes/Model/Post.swift`
+- `PatchNotes/FeedService.swift`
+- `PatchNotes/Model/AppStore.swift`
 - `PatchNotes/Views/FeedView.swift`
 - `ASYNC_AGENT_HANDOFF.md`
 
@@ -33,12 +34,11 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 ### Open Risks / Notes
 
-- Follow controls now exist on Release Detail + Release Calendar + My Games surfaces, but not yet in profile surfaces.
-- Following feed usefulness still depends on posts having `game_id`; composer now supports this, but older posts remain unlinked.
+- Public profile display depends on `public_profiles` view; posts/comments from users without completed profiles may show no author label.
 
 ## Next Recommended Action
 
 - Continue open-ended roadmap execution (priority order):
-  1. Public profile joins/views for posts/comments (no N+1 author fetches)
-  2. Feed rows/post detail: show linked game chips and jump-to-game context
-  3. Notification inbox polish (read/unread filters, grouped by recency)
+  1. Feed rows/post detail: show linked game chips and jump-to-game context
+  2. Notification inbox polish (read/unread filters, grouped by recency)
+  3. Release Calendar polish tied to follow/watch state and social activity

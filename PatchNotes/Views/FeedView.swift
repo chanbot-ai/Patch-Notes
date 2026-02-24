@@ -93,6 +93,7 @@ struct FeedView: View {
             ForEach(activePosts) { post in
                 FeedPostRow(
                     post: post,
+                    authorProfile: store.publicProfile(for: post.authorID),
                     reactionCountOverride: store.reactionTotal(for: post),
                     reactionTypes: store.reactionTypes,
                     reactionCounts: store.reactionCountsByPost[post.id] ?? [],
@@ -205,6 +206,7 @@ struct FeedView: View {
 
 private struct FeedPostRow: View {
     let post: Post
+    let authorProfile: PublicProfile?
     let reactionCountOverride: Int
     let reactionTypes: [ReactionType]
     let reactionCounts: [PostReactionCount]
@@ -214,6 +216,11 @@ private struct FeedPostRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let authorText = authorDisplayName {
+                Text(authorText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.65))
+            }
             if let title = post.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
                 Text(title)
                     .font(.headline)
@@ -314,6 +321,15 @@ private struct FeedPostRow: View {
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         }
     }
+
+    private var authorDisplayName: String? {
+        guard let authorProfile else { return nil }
+        if let displayName = authorProfile.display_name?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !displayName.isEmpty {
+            return displayName
+        }
+        return "u/\(authorProfile.username)"
+    }
 }
 
 private struct PostCommentsDetailView: View {
@@ -410,6 +426,7 @@ private struct PostCommentsDetailView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         CommentRowCard(
                             comment: comment,
+                            authorProfile: store.publicProfile(for: comment.userID),
                             isReply: false,
                             reactionTypes: store.reactionTypes,
                             reactionCounts: store.commentReactionCounts(for: comment.id),
@@ -456,13 +473,14 @@ private struct PostCommentsDetailView: View {
                             if repliesExpanded {
                                 VStack(spacing: 10) {
                                     ForEach(replies) { reply in
-                                        CommentRowCard(
-                                            comment: reply,
-                                            isReply: true,
-                                            reactionTypes: store.reactionTypes,
-                                            reactionCounts: store.commentReactionCounts(for: reply.id),
-                                            selectedReactionTypeIDs: store.viewerCommentReactionTypeIDsByComment[reply.id] ?? [],
-                                            reactionTotalOverride: store.commentReactionTotal(for: reply),
+                                CommentRowCard(
+                                    comment: reply,
+                                    authorProfile: store.publicProfile(for: reply.userID),
+                                    isReply: true,
+                                    reactionTypes: store.reactionTypes,
+                                    reactionCounts: store.commentReactionCounts(for: reply.id),
+                                    selectedReactionTypeIDs: store.viewerCommentReactionTypeIDsByComment[reply.id] ?? [],
+                                    reactionTotalOverride: store.commentReactionTotal(for: reply),
                                             onReact: { reactionTypeID in
                                                 store.reactToComment(reply.id, reactionTypeId: reactionTypeID)
                                             },
@@ -539,6 +557,11 @@ private struct PostCommentsDetailView: View {
 
     private var postHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let authorProfile = store.publicProfile(for: post.authorID) {
+                Text(authorDisplayName(for: authorProfile))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.65))
+            }
             if let title = post.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
                 Text(title)
                     .font(.headline)
@@ -579,6 +602,14 @@ private struct PostCommentsDetailView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         }
+    }
+
+    private func authorDisplayName(for profile: PublicProfile) -> String {
+        if let displayName = profile.display_name?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !displayName.isEmpty {
+            return displayName
+        }
+        return "u/\(profile.username)"
     }
 
     private var commentComposer: some View {
@@ -634,6 +665,7 @@ private struct PostCommentsDetailView: View {
 
 private struct CommentRowCard: View {
     let comment: Comment
+    let authorProfile: PublicProfile?
     let isReply: Bool
     let reactionTypes: [ReactionType]
     let reactionCounts: [CommentReactionCount]
@@ -645,6 +677,11 @@ private struct CommentRowCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
+                if let authorText = authorDisplayName {
+                    Text(authorText)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.68))
+                }
                 Text(isReply ? "Reply" : "Comment")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.82))
@@ -730,6 +767,15 @@ private struct CommentRowCard: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.white.opacity(isReply ? 0.06 : 0.08), lineWidth: 1)
         }
+    }
+
+    private var authorDisplayName: String? {
+        guard let authorProfile else { return nil }
+        if let displayName = authorProfile.display_name?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !displayName.isEmpty {
+            return displayName
+        }
+        return "u/\(authorProfile.username)"
     }
 }
 
