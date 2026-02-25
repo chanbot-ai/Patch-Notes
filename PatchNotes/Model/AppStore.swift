@@ -1221,10 +1221,6 @@ final class AppStore: ObservableObject {
         current.insert(comment, at: 0)
         nextComments[comment.postID] = current
         commentsByPost = nextComments
-
-        var nextHasMore = commentHasMoreByPost
-        nextHasMore[comment.postID] = true
-        commentHasMoreByPost = nextHasMore
     }
 
     private func removeOptimisticComment(_ comment: Comment) {

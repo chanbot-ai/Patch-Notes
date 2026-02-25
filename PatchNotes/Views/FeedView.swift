@@ -16,6 +16,23 @@ private enum FeedScope: String, CaseIterable, Identifiable {
     }
 }
 
+private func compactRelativeTimestamp(_ date: Date, now: Date = Date()) -> String {
+    let delta = max(Int(now.timeIntervalSince(date)), 0)
+    if delta < 60 { return "now" }
+    if delta < 3_600 { return "\(delta / 60)m" }
+    if delta < 86_400 { return "\(delta / 3_600)h" }
+    if delta < 604_800 { return "\(delta / 86_400)d" }
+    if delta < 2_592_000 { return "\(delta / 604_800)w" }
+    if delta < 31_536_000 { return "\(delta / 2_592_000)mo" }
+    return "\(delta / 31_536_000)y"
+}
+
+private extension URL {
+    var isGIFAsset: Bool {
+        pathExtension.lowercased() == "gif"
+    }
+}
+
 struct FeedView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var store: AppStore
@@ -147,8 +164,14 @@ struct FeedView: View {
                 Button {
                     showingComposer = true
                 } label: {
-                    Label("Post", systemImage: "square.and.pencil")
+                    Image(systemName: "square.and.pencil")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .padding(10)
+                        .background(Color.white.opacity(0.08), in: Circle())
                 }
+                .buttonStyle(.plain)
+                .frame(minWidth: 36, minHeight: 36)
                 .accessibilityLabel("Create post")
             }
 
@@ -175,7 +198,8 @@ struct FeedView: View {
                     }
                     .frame(minWidth: 34, minHeight: 34)
                 }
-                .padding(.leading, 12)
+                .buttonStyle(.plain)
+                .padding(.leading, 14)
                 .accessibilityLabel(
                     store.unreadNotificationsCount > 0
                     ? "Notifications, \(store.unreadNotificationsCount) unread"
@@ -343,7 +367,7 @@ private struct FeedPostRow: View {
                     Label(String(format: "%.1f", hotScore), systemImage: "flame.fill")
                 }
                 Spacer()
-                Text(post.created_at, style: .relative)
+                Text(compactRelativeTimestamp(post.created_at))
             }
             .font(.caption)
             .foregroundStyle(.white.opacity(0.55))
@@ -433,9 +457,16 @@ private struct PostMediaPreview: View {
                     case .text:
                         EmptyView()
                     case .image:
-                        RemoteMediaImage(primaryURL: mediaURL, fallbackURL: MediaFallback.gameScreenshot)
-                            .frame(height: height)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        if mediaURL.isGIFAsset {
+                            EmbeddedVideoPlayer(source: .web(mediaURL))
+                                .frame(height: height)
+                                .allowsHitTesting(false)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        } else {
+                            RemoteMediaImage(primaryURL: mediaURL, fallbackURL: MediaFallback.gameScreenshot)
+                                .frame(height: height)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
                     case .video:
                         let previewURL = post.thumbnailURL ?? mediaURL
                         RemoteMediaImage(primaryURL: previewURL, fallbackURL: MediaFallback.videoThumbnail)
@@ -474,14 +505,49 @@ private struct PostCommentsDetailView: View {
     }
 
     private var rootComments: [Comment] {
-        comments.filter { $0.parentCommentID == nil }
-    }
-
-    private var repliesByParent: [UUID: [Comment]] {
-        Dictionary(
+        let roots = comments.filter { $0.parentCommentID == nil }
+        let replies = Dictionary(
             grouping: comments.filter { $0.parentCommentID != nil },
             by: { $0.parentCommentID! }
         )
+
+        switch store.commentSortMode(for: post.id) {
+        case .new:
+            return roots.sorted { $0.created_at > $1.created_at }
+        case .top:
+            return roots.sorted { lhs, rhs in
+                let lhsReplyCount = replies[lhs.id]?.count ?? 0
+                let rhsReplyCount = replies[rhs.id]?.count ?? 0
+                let lhsScore = topSortScore(for: lhs, replyCount: lhsReplyCount)
+                let rhsScore = topSortScore(for: rhs, replyCount: rhsReplyCount)
+                if lhsScore == rhsScore {
+                    return lhs.created_at > rhs.created_at
+                }
+                return lhsScore > rhsScore
+            }
+        }
+    }
+
+    private var repliesByParent: [UUID: [Comment]] {
+        let grouped = Dictionary(
+            grouping: comments.filter { $0.parentCommentID != nil },
+            by: { $0.parentCommentID! }
+        )
+        switch store.commentSortMode(for: post.id) {
+        case .new:
+            return grouped.mapValues { $0.sorted { $0.created_at > $1.created_at } }
+        case .top:
+            return grouped.mapValues { comments in
+                comments.sorted { lhs, rhs in
+                    let lhsScore = topSortScore(for: lhs, replyCount: 0)
+                    let rhsScore = topSortScore(for: rhs, replyCount: 0)
+                    if lhsScore == rhsScore {
+                        return lhs.created_at > rhs.created_at
+                    }
+                    return lhsScore > rhsScore
+                }
+            }
+        }
     }
 
     private var replyTargetComment: Comment? {
@@ -753,6 +819,17 @@ private struct PostCommentsDetailView: View {
         return "u/\(profile.username)"
     }
 
+    private func topSortScore(for comment: Comment, replyCount: Int) -> Double {
+        let liveReactionTotal = store.commentReactionTotal(for: comment)
+        let reactionScore = max(
+            Double(comment.reaction_count ?? 0),
+            Double(liveReactionTotal),
+            comment.hot_score ?? 0
+        )
+        let replyScore = Double(replyCount) * 2.0
+        return reactionScore + replyScore
+    }
+
     private var commentComposer: some View {
         VStack(alignment: .leading, spacing: 10) {
             if replyTargetComment != nil {
@@ -837,7 +914,7 @@ private struct CommentRowCard: View {
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.55))
                 }
-                Text(comment.created_at, style: .relative)
+                Text(compactRelativeTimestamp(comment.created_at))
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.5))
             }
@@ -1157,7 +1234,7 @@ private struct NotificationRow: View {
                             .background(AppTheme.accent.opacity(0.12), in: Capsule())
                     }
                     Spacer(minLength: 0)
-                    Text(notification.createdAt, style: .relative)
+                    Text(compactRelativeTimestamp(notification.createdAt))
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.45))
                 }
