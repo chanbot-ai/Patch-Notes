@@ -425,7 +425,11 @@ final class AppStore: ObservableObject {
             parent_comment_id: normalizedParentId,
             created_at: Date(),
             reaction_count: 0,
-            hot_score: 0
+            hot_score: 0,
+            author_username: nil,
+            author_display_name: nil,
+            author_avatar_url: nil,
+            author_created_at: nil
         )
 
         applyOptimisticCommentInsert(tempComment)

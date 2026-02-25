@@ -115,32 +115,38 @@ struct FeedView: View {
         .scrollContentBackground(.hidden)
         .navigationTitle("Feed")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    showingComposer = true
-                } label: {
-                    Label("Post", systemImage: "square.and.pencil")
-                }
-                .accessibilityLabel("Create post")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showingNotifications = true
-                } label: {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "bell")
-                        if store.unreadNotificationsCount > 0 {
-                            Text("\(min(store.unreadNotificationsCount, 99))")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(AppTheme.accent, in: Capsule())
-                                .offset(x: 10, y: -8)
-                        }
+            ToolbarItemGroup(placement: .topBarLeading) {
+                HStack(spacing: 18) {
+                    Button {
+                        showingComposer = true
+                    } label: {
+                        Label("Post", systemImage: "square.and.pencil")
                     }
+                    .accessibilityLabel("Create post")
+
+                    Button {
+                        showingNotifications = true
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "bell")
+                            if store.unreadNotificationsCount > 0 {
+                                Text("\(min(store.unreadNotificationsCount, 99))")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(AppTheme.accent, in: Capsule())
+                                    .offset(x: 10, y: -8)
+                            }
+                        }
+                        .frame(minWidth: 24, minHeight: 24)
+                    }
+                    .accessibilityLabel(
+                        store.unreadNotificationsCount > 0
+                        ? "Notifications, \(store.unreadNotificationsCount) unread"
+                        : "Notifications"
+                    )
                 }
-                .accessibilityLabel(store.unreadNotificationsCount > 0 ? "Notifications, \(store.unreadNotificationsCount) unread" : "Notifications")
             }
         }
         .sheet(isPresented: $showingComposer) {
