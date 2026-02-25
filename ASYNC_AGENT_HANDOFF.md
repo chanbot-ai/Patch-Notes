@@ -6,14 +6,14 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Composer media enrichment + validation
+- Last milestone: Following feed CTA + composer game ordering
 
 ## Latest Milestone
 
 ### Summary
 
-- Refined the post composer media flow: single media URL input, auto validation, YouTube thumbnail inference, and inline preview with quick removal.
-- Composer now blocks invalid media URLs and posts media-only entries with the proper `image`/`video` type.
+- Added quick navigation CTA buttons when the Following feed is empty, guiding users to the Release Calendar and My Games.
+- Prioritized followed games first in the post composer game picker to keep game-linked posts aligned with Following feed usage.
 
 ### Files Touched
 
@@ -26,12 +26,12 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 ### Verification
 
-- `xcodebuild -scheme PatchNotes -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build` failed (CoreSimulator connection invalid; ModuleCache/SwiftPM access denied in sandbox).
+- `xcodebuild -scheme PatchNotes -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug build` failed (CoreSimulator connection invalid; sandbox denied ModuleCache/SwiftPM cache access).
 
 ### Open Risks / Notes
 
-- None beyond the usual media URL validation depending on user input quality.
+- None.
 
 ## Next Recommended Action
 
-- Run the iOS build in a full Xcode environment to validate the new composer fields + feed media previews.
+- Run the iOS build in a full Xcode environment to validate the new empty-state navigation and composer ordering.

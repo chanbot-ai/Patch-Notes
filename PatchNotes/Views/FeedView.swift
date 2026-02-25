@@ -87,6 +87,34 @@ struct FeedView: View {
                     Text(feedScope == .hot ? "Create the first post from the compose button." : "Follow some games to populate your following feed.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if feedScope == .following {
+                        HStack(spacing: 10) {
+                            NavigationLink {
+                                ReleaseCalendarView()
+                            } label: {
+                                Text("Browse Calendar")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(AppTheme.accent.opacity(0.28), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+
+                            NavigationLink {
+                                MyGamesView()
+                            } label: {
+                                Text("My Games")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.white.opacity(0.12), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.top, 4)
+                    }
                 }
             }
 
@@ -1290,6 +1318,11 @@ private struct PostComposerView: View {
 
     private var availableGames: [Game] {
         store.socialGames.sorted { lhs, rhs in
+            let lhsFollowing = store.isFollowingGame(lhs)
+            let rhsFollowing = store.isFollowingGame(rhs)
+            if lhsFollowing != rhsFollowing {
+                return lhsFollowing && !rhsFollowing
+            }
             if lhs.releaseDate == rhs.releaseDate {
                 return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
             }
