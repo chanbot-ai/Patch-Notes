@@ -1206,6 +1206,11 @@ final class AppStore: ObservableObject {
             var latestErrors = commentLoadErrorByPost
             latestErrors[postId] = error.localizedDescription
             commentLoadErrorByPost = latestErrors
+
+            var latestHasMore = commentHasMoreByPost
+            latestHasMore[postId] = false
+            commentHasMoreByPost = latestHasMore
+
             print("Failed to load comments:", error)
         }
     }
