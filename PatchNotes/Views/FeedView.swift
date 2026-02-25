@@ -471,6 +471,7 @@ private struct GameContextChip: View {
 private struct PostMediaPreview: View {
     let post: Post
     var height: CGFloat = 190
+    @State private var showingVideoPlayback = false
 
     var body: some View {
         Group {
@@ -498,33 +499,32 @@ private struct PostMediaPreview: View {
                         ExternalLinkPreviewCard(url: mediaURL)
                             .frame(height: height)
                     case .video:
-                        if let youtubeID = YouTubeIDParser.videoID(from: mediaURL) {
-                            EmbeddedVideoPlayer(
-                                source: .youtube(youtubeID),
-                                mutedAutoplay: true
-                            )
+                        let previewURL = post.thumbnailURL ?? mediaURL
+                        RemoteMediaImage(primaryURL: previewURL, fallbackURL: MediaFallback.videoThumbnail)
                             .frame(height: height)
-                            .allowsHitTesting(false)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        } else {
-                            let previewURL = post.thumbnailURL ?? mediaURL
-                            RemoteMediaImage(primaryURL: previewURL, fallbackURL: MediaFallback.videoThumbnail)
-                                .frame(height: height)
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                .overlay {
-                                    Image(systemName: "play.circle.fill")
-                                        .font(.system(size: height * 0.3, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .shadow(color: .black.opacity(0.45), radius: 8, y: 3)
-                                }
-                        }
+                            .overlay {
+                                Image(systemName: "play.circle.fill")
+                                    .font(.system(size: height * 0.3, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .shadow(color: .black.opacity(0.45), radius: 8, y: 3)
+                            }
+                            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .onTapGesture {
+                                showingVideoPlayback = true
+                            }
                     }
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(Color.white.opacity(0.16), lineWidth: 1)
                 }
-                .accessibilityHidden(post.contentType != .link)
+            }
+        }
+        .sheet(isPresented: $showingVideoPlayback) {
+            if let mediaURL = post.mediaURL {
+                InAppSafariView(url: mediaURL)
+                    .ignoresSafeArea()
             }
         }
     }
