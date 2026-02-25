@@ -6,27 +6,25 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Profile-joined feed/comment views + client cache hydration
+- Last milestone: Post media previews + composer media inputs
 
 ## Latest Milestone
 
 ### Summary
 
-- Added profile-joined feed/comment views (plus `post_comments_recent`) so feed/comment queries can return author profile fields in one call.
-- Extended Post/Comment models to decode author profile columns and hydrated the public profile cache from fetched posts/comments.
-- Switched comment “New” fetches to `post_comments_recent` to keep profile fields consistent across sorts.
+- Added post media preview rendering in feed rows and comment detail headers, including video thumbnail treatment.
+- Extended the post composer to accept optional media + thumbnail URLs, infer post type, and infer YouTube thumbnails.
+- Added post model helpers to normalize content type and media/thumbnail URLs.
 
 ### Files Touched
 
-- `PatchNotes/FeedService.swift`
-- `PatchNotes/Model/AppStore.swift`
 - `PatchNotes/Model/Post.swift`
-- `supabase/migrations/20260224121000_add_profile_columns_to_feed_views.sql`
+- `PatchNotes/Views/FeedView.swift`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
 
-- `supabase/migrations/20260224121000_add_profile_columns_to_feed_views.sql` (not applied in this environment)
+- None.
 
 ### Verification
 
@@ -34,9 +32,8 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 ### Open Risks / Notes
 
-- Supabase migration still needs to be applied in a real environment.
-- If author profiles are missing from `public_profiles`, client still falls back to the batched profile fetch.
+- Media URLs are accepted as raw strings; invalid URLs are ignored during insert.
 
 ## Next Recommended Action
 
-- Apply the new Supabase migration, then rerun the iOS build in a full Xcode environment.
+- Run the iOS build in a full Xcode environment to validate the new composer fields + feed media previews.

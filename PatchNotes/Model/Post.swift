@@ -33,6 +33,35 @@ struct Post: Identifiable, Decodable {
             created_at: author_created_at
         )
     }
+
+    enum ContentType: String {
+        case text
+        case image
+        case video
+    }
+
+    var contentType: ContentType {
+        let normalized = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == ContentType.video.rawValue {
+            return .video
+        }
+        if normalized == ContentType.image.rawValue {
+            return .image
+        }
+        return mediaURL == nil ? .text : .image
+    }
+
+    var mediaURL: URL? {
+        guard let media_url,
+              !media_url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return URL(string: media_url)
+    }
+
+    var thumbnailURL: URL? {
+        guard let thumbnail_url,
+              !thumbnail_url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return URL(string: thumbnail_url)
+    }
 }
 
 struct ReactionType: Identifiable, Decodable, Equatable {
