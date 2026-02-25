@@ -157,6 +157,9 @@ struct FeedView: View {
                     onReact: { reactionTypeID in
                         store.react(to: post.id, with: reactionTypeID)
                     },
+                    onOpenPostDetail: {
+                        selectedCommentsPost = post
+                    },
                     onOpenComments: {
                         selectedCommentsPost = post
                     }
@@ -305,6 +308,7 @@ private struct FeedPostRow: View {
     let reactionCounts: [PostReactionCount]
     let selectedReactionTypeIDs: Set<UUID>
     let onReact: (UUID) -> Void
+    let onOpenPostDetail: (() -> Void)?
     let onOpenComments: () -> Void
 
     var body: some View {
@@ -343,7 +347,7 @@ private struct FeedPostRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            PostMediaPreview(post: post, height: 190)
+            PostMediaPreview(post: post, height: 190, onVideoTap: onOpenPostDetail)
 
             if !reactionTypes.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -471,6 +475,7 @@ private struct GameContextChip: View {
 private struct PostMediaPreview: View {
     let post: Post
     var height: CGFloat = 190
+    var onVideoTap: (() -> Void)? = nil
     @State private var showingVideoPlayback = false
 
     var body: some View {
@@ -511,7 +516,11 @@ private struct PostMediaPreview: View {
                             }
                             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .onTapGesture {
-                                showingVideoPlayback = true
+                                if let onVideoTap {
+                                    onVideoTap()
+                                } else {
+                                    showingVideoPlayback = true
+                                }
                             }
                     }
                 }
