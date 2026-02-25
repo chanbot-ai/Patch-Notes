@@ -38,6 +38,7 @@ struct Post: Identifiable, Decodable {
         case text
         case image
         case video
+        case link
     }
 
     var contentType: ContentType {
@@ -45,8 +46,14 @@ struct Post: Identifiable, Decodable {
         if normalized == ContentType.video.rawValue {
             return .video
         }
+        if normalized == ContentType.link.rawValue {
+            return .link
+        }
         if normalized == ContentType.image.rawValue {
             return .image
+        }
+        if let mediaURL, mediaURL.isTwitterStatusURL {
+            return .link
         }
         return mediaURL == nil ? .text : .image
     }
@@ -61,6 +68,18 @@ struct Post: Identifiable, Decodable {
         guard let thumbnail_url,
               !thumbnail_url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return URL(string: thumbnail_url)
+    }
+}
+
+private extension URL {
+    var isTwitterStatusURL: Bool {
+        guard let host = host?.lowercased() else { return false }
+        let isSupportedHost = host == "x.com"
+            || host.hasSuffix(".x.com")
+            || host == "twitter.com"
+            || host.hasSuffix(".twitter.com")
+        guard isSupportedHost else { return false }
+        return pathComponents.contains("status")
     }
 }
 

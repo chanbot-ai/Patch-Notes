@@ -31,6 +31,16 @@ private extension URL {
     var isGIFAsset: Bool {
         pathExtension.lowercased() == "gif"
     }
+
+    var isTwitterStatusURL: Bool {
+        guard let host = host?.lowercased() else { return false }
+        let supportedHost = host == "x.com"
+            || host.hasSuffix(".x.com")
+            || host == "twitter.com"
+            || host.hasSuffix(".twitter.com")
+        guard supportedHost else { return false }
+        return pathComponents.contains("status")
+    }
 }
 
 struct FeedView: View {
@@ -484,6 +494,9 @@ private struct PostMediaPreview: View {
                                 .frame(height: height)
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
+                    case .link:
+                        ExternalLinkPreviewCard(url: mediaURL)
+                            .frame(height: height)
                     case .video:
                         if let youtubeID = YouTubeIDParser.videoID(from: mediaURL) {
                             EmbeddedVideoPlayer(
@@ -511,9 +524,79 @@ private struct PostMediaPreview: View {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(Color.white.opacity(0.16), lineWidth: 1)
                 }
-                .accessibilityHidden(true)
+                .accessibilityHidden(post.contentType != .link)
             }
         }
+    }
+}
+
+private struct ExternalLinkPreviewCard: View {
+    let url: URL
+
+    private var hostLabel: String {
+        (url.host ?? url.absoluteString)
+            .replacingOccurrences(of: "www.", with: "")
+    }
+
+    private var titleLabel: String {
+        url.isTwitterStatusURL ? "X / Twitter Post" : "External Link"
+    }
+
+    var body: some View {
+        Link(destination: url) {
+            ZStack(alignment: .bottomTrailing) {
+                LinearGradient(
+                    colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: url.isTwitterStatusURL ? "bubble.left.and.bubble.right.fill" : "link")
+                            .foregroundStyle(AppTheme.accent)
+                        Text(titleLabel)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                        Spacer(minLength: 0)
+                    }
+
+                    Text(hostLabel)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+
+                    Text(url.absoluteString)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.42))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up.right")
+                        Text("Open Link")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(AppTheme.accent.opacity(0.14), in: Capsule())
+                }
+                .padding(14)
+
+                if url.isTwitterStatusURL {
+                    Text("X")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.1), in: Capsule())
+                        .padding(12)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -1330,6 +1413,7 @@ private struct ReactionErrorToast: View {
 private enum ComposerMediaKind: String {
     case image
     case video
+    case link
 }
 
 private struct ComposerMediaAttachment {
@@ -1372,7 +1456,7 @@ private struct PostComposerView: View {
             }
 
             Section("Media (optional)") {
-                TextField("Image or video URL", text: $mediaURLText)
+                TextField("Image, video, or X/Twitter URL", text: $mediaURLText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
@@ -1462,7 +1546,7 @@ private struct PostComposerView: View {
 
     private var mediaValidationMessage: String? {
         guard !trimmedMediaURL.isEmpty else { return nil }
-        return mediaAttachment == nil ? "Enter a valid image or video URL." : nil
+        return mediaAttachment == nil ? "Enter a valid image, video, or X/Twitter post URL." : nil
     }
 
     private func save() {
@@ -1473,7 +1557,7 @@ private struct PostComposerView: View {
 
         guard canSubmit else { return }
         if !trimmedMediaURL.isEmpty, mediaAttachment == nil {
-            errorMessage = "Please enter a valid image or video URL."
+            errorMessage = "Please enter a valid image, video, or X/Twitter post URL."
             return
         }
 
@@ -1507,6 +1591,9 @@ private struct PostComposerView: View {
     }
 
     private func inferMediaKind(url: URL) -> ComposerMediaKind? {
+        if url.isTwitterStatusURL {
+            return .link
+        }
         if YouTubeIDParser.videoID(from: url) != nil {
             return .video
         }
@@ -1557,6 +1644,9 @@ private struct ComposerMediaPreview: View {
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.45), radius: 8, y: 3)
                     }
+            case .link:
+                ExternalLinkPreviewCard(url: attachment.url)
+                    .frame(height: height)
             }
         }
         .overlay {
