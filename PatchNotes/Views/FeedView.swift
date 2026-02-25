@@ -159,53 +159,32 @@ struct FeedView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .navigationTitle("Feed")
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
+        .safeAreaInset(edge: .top) {
+            HStack(spacing: 14) {
+                circleFeedActionButton(
+                    systemImage: "square.and.pencil",
+                    accessibilityLabel: "Create post",
+                    badgeCount: nil
+                ) {
                     showingComposer = true
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.92))
-                        .padding(10)
-                        .background(Color.white.opacity(0.08), in: Circle())
                 }
-                .buttonStyle(.plain)
-                .frame(minWidth: 36, minHeight: 36)
-                .accessibilityLabel("Create post")
-            }
 
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    showingNotifications = true
-                } label: {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "bell")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .padding(10)
-                            .background(Color.white.opacity(0.08), in: Circle())
-
-                        if store.unreadNotificationsCount > 0 {
-                            Text("\(min(store.unreadNotificationsCount, 99))")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(AppTheme.accent, in: Capsule())
-                                .offset(x: 12, y: -10)
-                        }
-                    }
-                    .frame(minWidth: 34, minHeight: 34)
-                }
-                .buttonStyle(.plain)
-                .padding(.leading, 14)
-                .accessibilityLabel(
-                    store.unreadNotificationsCount > 0
+                circleFeedActionButton(
+                    systemImage: "bell",
+                    accessibilityLabel: store.unreadNotificationsCount > 0
                     ? "Notifications, \(store.unreadNotificationsCount) unread"
-                    : "Notifications"
-                )
+                    : "Notifications",
+                    badgeCount: store.unreadNotificationsCount
+                ) {
+                    showingNotifications = true
+                }
+
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 2)
+            .padding(.bottom, 8)
+            .background(Color.clear)
         }
         .sheet(isPresented: $showingComposer) {
             NavigationStack {
@@ -266,6 +245,44 @@ struct FeedView: View {
                 store.loadFollowingFeed()
             }
         }
+    }
+
+    @ViewBuilder
+    private func circleFeedActionButton(
+        systemImage: String,
+        accessibilityLabel: String,
+        badgeCount: Int?,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .frame(width: 42, height: 42)
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(0.08))
+                    )
+                    .overlay {
+                        Circle()
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    }
+
+                if let badgeCount, badgeCount > 0 {
+                    Text("\(min(badgeCount, 99))")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(AppTheme.accent, in: Capsule())
+                        .offset(x: 8, y: -6)
+                }
+            }
+            .frame(width: 48, height: 48, alignment: .center)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
@@ -468,16 +485,26 @@ private struct PostMediaPreview: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
                     case .video:
-                        let previewURL = post.thumbnailURL ?? mediaURL
-                        RemoteMediaImage(primaryURL: previewURL, fallbackURL: MediaFallback.videoThumbnail)
+                        if let youtubeID = YouTubeIDParser.videoID(from: mediaURL) {
+                            EmbeddedVideoPlayer(
+                                source: .youtube(youtubeID),
+                                mutedAutoplay: true
+                            )
                             .frame(height: height)
+                            .allowsHitTesting(false)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay {
-                                Image(systemName: "play.circle.fill")
-                                    .font(.system(size: height * 0.3, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .shadow(color: .black.opacity(0.45), radius: 8, y: 3)
-                            }
+                        } else {
+                            let previewURL = post.thumbnailURL ?? mediaURL
+                            RemoteMediaImage(primaryURL: previewURL, fallbackURL: MediaFallback.videoThumbnail)
+                                .frame(height: height)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay {
+                                    Image(systemName: "play.circle.fill")
+                                        .font(.system(size: height * 0.3, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .shadow(color: .black.opacity(0.45), radius: 8, y: 3)
+                                }
+                        }
                     }
                 }
                 .overlay {

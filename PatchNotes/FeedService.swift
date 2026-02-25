@@ -401,6 +401,8 @@ final class FeedService {
                 .from("post_comments_ranked")
                 .select("id,post_id,user_id,body,parent_comment_id,created_at,reaction_count,hot_score,author_username,author_display_name,author_avatar_url,author_created_at")
                 .eq("post_id", value: postID.uuidString)
+                .order("hot_score", ascending: false)
+                .order("created_at", ascending: false)
                 .range(from: offset, to: rangeEnd)
                 .execute()
             return try makeDatabaseDecoder().decode([Comment].self, from: response.data)
