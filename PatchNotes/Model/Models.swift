@@ -199,6 +199,40 @@ struct EsportsMatch: Identifiable, Hashable {
     let detailLine: String
     let subDetail: String
     let isFeatured: Bool
+    let scheduledAt: Date?
+    let streamURL: URL?
+
+    init(
+        id: UUID,
+        league: String,
+        homeTeam: String,
+        awayTeam: String,
+        homeRecord: String,
+        awayRecord: String,
+        homeScore: Int,
+        awayScore: Int,
+        state: MatchState,
+        detailLine: String,
+        subDetail: String,
+        isFeatured: Bool,
+        scheduledAt: Date? = nil,
+        streamURL: URL? = nil
+    ) {
+        self.id = id
+        self.league = league
+        self.homeTeam = homeTeam
+        self.awayTeam = awayTeam
+        self.homeRecord = homeRecord
+        self.awayRecord = awayRecord
+        self.homeScore = homeScore
+        self.awayScore = awayScore
+        self.state = state
+        self.detailLine = detailLine
+        self.subDetail = subDetail
+        self.isFeatured = isFeatured
+        self.scheduledAt = scheduledAt
+        self.streamURL = streamURL
+    }
 }
 
 struct MarketOutcome: Identifiable, Hashable {

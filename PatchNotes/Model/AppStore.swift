@@ -182,6 +182,10 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func refreshEsports() async {
+        refresh()
+    }
+
     func refreshHotFeed() async {
         subscribeToFeedRealtime()
         feedIsLoading = true
@@ -867,105 +871,34 @@ struct AppSeedData {
             )
         ]
 
+        func scheduleTime(daysFromNow: Int, hour: Int, minute: Int = 0) -> Date {
+            let base = calendar.date(byAdding: .day, value: daysFromNow, to: referenceDate) ?? referenceDate
+            return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: base) ?? base
+        }
+
         esportsMatches = [
-            EsportsMatch(
-                id: UUID(),
-                league: "VCT",
-                homeTeam: "Sentinels",
-                awayTeam: "Paper Rex",
-                homeRecord: "12-4",
-                awayRecord: "11-5",
-                homeScore: 2,
-                awayScore: 1,
-                state: .live,
-                detailLine: "LIVE · MAP 4",
-                subDetail: "Ascent · 7m",
-                isFeatured: true
-            ),
-            EsportsMatch(
-                id: UUID(),
-                league: "CS2",
-                homeTeam: "G2",
-                awayTeam: "FaZe",
-                homeRecord: "9-3",
-                awayRecord: "8-4",
-                homeScore: 16,
-                awayScore: 13,
-                state: .final,
-                detailLine: "FINAL",
-                subDetail: "Inferno",
-                isFeatured: false
-            ),
-            EsportsMatch(
-                id: UUID(),
-                league: "CS2",
-                homeTeam: "Team Spirit",
-                awayTeam: "MOUZ",
-                homeRecord: "7-5",
-                awayRecord: "7-5",
-                homeScore: 0,
-                awayScore: 0,
-                state: .upcoming,
-                detailLine: "10:00 AM · BO3",
-                subDetail: "Stage Match",
-                isFeatured: false
-            ),
-            EsportsMatch(
-                id: UUID(),
-                league: "LoL",
-                homeTeam: "T1",
-                awayTeam: "Gen.G",
-                homeRecord: "10-2",
-                awayRecord: "11-1",
-                homeScore: 1,
-                awayScore: 1,
-                state: .live,
-                detailLine: "LIVE · GAME 3",
-                subDetail: "Baron in 1m",
-                isFeatured: false
-            ),
-            EsportsMatch(
-                id: UUID(),
-                league: "LoL",
-                homeTeam: "G2",
-                awayTeam: "Fnatic",
-                homeRecord: "8-4",
-                awayRecord: "8-4",
-                homeScore: 2,
-                awayScore: 0,
-                state: .final,
-                detailLine: "FINAL",
-                subDetail: "Best of 3",
-                isFeatured: false
-            ),
-            EsportsMatch(
-                id: UUID(),
-                league: "Dota 2",
-                homeTeam: "Falcons",
-                awayTeam: "Liquid",
-                homeRecord: "6-3",
-                awayRecord: "5-4",
-                homeScore: 0,
-                awayScore: 0,
-                state: .upcoming,
-                detailLine: "1:30 PM · BO3",
-                subDetail: "Group Stage",
-                isFeatured: false
-            ),
-            EsportsMatch(
-                id: UUID(),
-                league: "Dota 2",
-                homeTeam: "Spirit",
-                awayTeam: "BetBoom",
-                homeRecord: "6-3",
-                awayRecord: "6-3",
-                homeScore: 1,
-                awayScore: 2,
-                state: .final,
-                detailLine: "FINAL",
-                subDetail: "Best of 3",
-                isFeatured: false
-            )
+            // Live
+            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "Sentinels", awayTeam: "Paper Rex", homeRecord: "12-4", awayRecord: "11-5", homeScore: 2, awayScore: 1, state: .live, detailLine: "LIVE · MAP 4", subDetail: "Ascent · 7m", isFeatured: true, streamURL: URL(string: "https://www.twitch.tv/valorant_esports")),
+            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "T1", awayTeam: "Gen.G", homeRecord: "10-2", awayRecord: "11-1", homeScore: 1, awayScore: 1, state: .live, detailLine: "LIVE · GAME 3", subDetail: "Baron in 1m", isFeatured: false, streamURL: URL(string: "https://www.twitch.tv/lck")),
+            // Final
+            EsportsMatch(id: UUID(), league: "CS2", homeTeam: "G2", awayTeam: "FaZe", homeRecord: "9-3", awayRecord: "8-4", homeScore: 16, awayScore: 13, state: .final, detailLine: "FINAL", subDetail: "Inferno", isFeatured: false),
+            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "G2", awayTeam: "Fnatic", homeRecord: "8-4", awayRecord: "8-4", homeScore: 2, awayScore: 0, state: .final, detailLine: "FINAL", subDetail: "Best of 3", isFeatured: false),
+            EsportsMatch(id: UUID(), league: "Dota 2", homeTeam: "Spirit", awayTeam: "BetBoom", homeRecord: "6-3", awayRecord: "6-3", homeScore: 1, awayScore: 2, state: .final, detailLine: "FINAL", subDetail: "Best of 3", isFeatured: false),
+            // Today – upcoming
+            EsportsMatch(id: UUID(), league: "CS2", homeTeam: "Team Spirit", awayTeam: "MOUZ", homeRecord: "7-5", awayRecord: "7-5", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Stage Match", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 0, hour: 10)),
+            EsportsMatch(id: UUID(), league: "Dota 2", homeTeam: "Falcons", awayTeam: "Liquid", homeRecord: "6-3", awayRecord: "5-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Group Stage", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 0, hour: 13, minute: 30)),
+            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "NRG", awayTeam: "100 Thieves", homeRecord: "9-3", awayRecord: "8-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Playoffs", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 0, hour: 17)),
+            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "Cloud9", awayTeam: "TSM", homeRecord: "7-5", awayRecord: "5-7", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO1", subDetail: "LCS Regular Season", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 0, hour: 20)),
+            // Tomorrow – upcoming
+            EsportsMatch(id: UUID(), league: "CS2", homeTeam: "Heroic", awayTeam: "Virtus.pro", homeRecord: "8-4", awayRecord: "7-5", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Group Stage", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 1, hour: 10)),
+            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "Loud", awayTeam: "Evil Geniuses", homeRecord: "10-2", awayRecord: "7-5", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Playoffs Quarterfinal", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 1, hour: 14)),
+            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "DRX", awayTeam: "KT Rolster", homeRecord: "9-3", awayRecord: "8-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO5", subDetail: "LCK Semifinals", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 1, hour: 18)),
+            // Day +2 – upcoming
+            EsportsMatch(id: UUID(), league: "Dota 2", homeTeam: "Team Secret", awayTeam: "OG", homeRecord: "5-4", awayRecord: "5-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Group Stage", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 2, hour: 11)),
+            EsportsMatch(id: UUID(), league: "CS2", homeTeam: "FaZe", awayTeam: "Vitality", homeRecord: "8-4", awayRecord: "9-3", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Playoffs Semifinal", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 2, hour: 15)),
+            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "Paper Rex", awayTeam: "Loud", homeRecord: "11-5", awayRecord: "10-2", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO5", subDetail: "Grand Final", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 2, hour: 19)),
+            // Day +3 – upcoming
+            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "T1", awayTeam: "DRX", homeRecord: "10-2", awayRecord: "9-3", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO5", subDetail: "LCK Grand Final", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 3, hour: 16)),
         ]
 
         esportsMarkets = [

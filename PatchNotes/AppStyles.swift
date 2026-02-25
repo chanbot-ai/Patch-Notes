@@ -604,3 +604,100 @@ struct TagChip: View {
             .background(Color.white.opacity(0.12), in: Capsule())
     }
 }
+
+struct TeamLogoBadge: View {
+    let team: String
+    var size: CGFloat = 20
+
+    private static let logoURLs: [String: URL] = [
+        "Sentinels":     URL(string: "https://ui-avatars.com/api/?name=Sentinels&background=d4333f&color=fff&size=128&rounded=true&bold=true")!,
+        "Paper Rex":     URL(string: "https://ui-avatars.com/api/?name=Paper+Rex&background=1aa4f2&color=fff&size=128&rounded=true&bold=true")!,
+        "T1":            URL(string: "https://ui-avatars.com/api/?name=T1&background=f22626&color=fff&size=128&rounded=true&bold=true")!,
+        "G2":            URL(string: "https://ui-avatars.com/api/?name=G2&background=f22626&color=fff&size=128&rounded=true&bold=true")!,
+        "Gen.G":         URL(string: "https://ui-avatars.com/api/?name=Gen.G&background=3d8cf5&color=fff&size=128&rounded=true&bold=true")!,
+        "Liquid":        URL(string: "https://ui-avatars.com/api/?name=Liquid&background=3d8cf5&color=fff&size=128&rounded=true&bold=true")!,
+        "FaZe":          URL(string: "https://ui-avatars.com/api/?name=FaZe&background=fa9124&color=fff&size=128&rounded=true&bold=true")!,
+        "Fnatic":        URL(string: "https://ui-avatars.com/api/?name=Fnatic&background=fa9124&color=fff&size=128&rounded=true&bold=true")!,
+        "NRG":           URL(string: "https://ui-avatars.com/api/?name=NRG&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "100 Thieves":   URL(string: "https://ui-avatars.com/api/?name=100+Thieves&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "Loud":          URL(string: "https://ui-avatars.com/api/?name=Loud&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "Evil Geniuses": URL(string: "https://ui-avatars.com/api/?name=Evil+Geniuses&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "Cloud9":        URL(string: "https://ui-avatars.com/api/?name=Cloud9&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "TSM":           URL(string: "https://ui-avatars.com/api/?name=TSM&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "DRX":           URL(string: "https://ui-avatars.com/api/?name=DRX&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "KT Rolster":    URL(string: "https://ui-avatars.com/api/?name=KT+Rolster&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "Team Spirit":   URL(string: "https://ui-avatars.com/api/?name=Team+Spirit&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "MOUZ":          URL(string: "https://ui-avatars.com/api/?name=MOUZ&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "Heroic":        URL(string: "https://ui-avatars.com/api/?name=Heroic&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "Virtus.pro":    URL(string: "https://ui-avatars.com/api/?name=Virtus.pro&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "Vitality":      URL(string: "https://ui-avatars.com/api/?name=Vitality&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "Spirit":        URL(string: "https://ui-avatars.com/api/?name=Spirit&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "BetBoom":       URL(string: "https://ui-avatars.com/api/?name=BetBoom&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "Falcons":       URL(string: "https://ui-avatars.com/api/?name=Falcons&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "Team Secret":   URL(string: "https://ui-avatars.com/api/?name=Team+Secret&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "OG":            URL(string: "https://ui-avatars.com/api/?name=OG&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+    ]
+
+    private var logoURL: URL? { Self.logoURLs[team] }
+
+    private var initials: String {
+        let letters = team.split(separator: " ").prefix(2).compactMap { $0.first.map(String.init) }.joined()
+        return letters.isEmpty ? "T" : letters
+    }
+
+    private var colors: [Color] {
+        switch team {
+        case "Sentinels":
+            return [Color(red: 0.84, green: 0.20, blue: 0.28), Color(red: 0.40, green: 0.07, blue: 0.09)]
+        case "Paper Rex":
+            return [Color(red: 0.10, green: 0.64, blue: 0.95), Color(red: 0.08, green: 0.30, blue: 0.68)]
+        case "T1", "G2":
+            return [Color(red: 0.95, green: 0.15, blue: 0.15), Color(red: 0.50, green: 0.04, blue: 0.04)]
+        case "Gen.G", "Liquid":
+            return [Color(red: 0.24, green: 0.55, blue: 0.96), Color(red: 0.10, green: 0.20, blue: 0.55)]
+        case "FaZe", "Fnatic":
+            return [Color(red: 0.98, green: 0.57, blue: 0.14), Color(red: 0.61, green: 0.30, blue: 0.04)]
+        default:
+            return [AppTheme.accentBlue, AppTheme.accent]
+        }
+    }
+
+    private var gradientBadge: some View {
+        Circle()
+            .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: size, height: size)
+            .overlay {
+                Text(initials)
+                    .font(.system(size: size * 0.40, weight: .black))
+                    .foregroundStyle(.white)
+            }
+            .overlay {
+                Circle()
+                    .stroke(Color.white.opacity(0.24), lineWidth: 1)
+            }
+    }
+
+    var body: some View {
+        if let url = logoURL {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: size, height: size)
+                        .clipShape(Circle())
+                        .overlay {
+                            Circle().stroke(Color.white.opacity(0.24), lineWidth: 1)
+                        }
+                case .empty, .failure:
+                    gradientBadge
+                @unknown default:
+                    gradientBadge
+                }
+            }
+        } else {
+            gradientBadge
+        }
+    }
+}

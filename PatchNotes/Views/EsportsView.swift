@@ -33,21 +33,35 @@ private struct LeagueScoreSection: Identifiable {
 struct EsportsView: View {
     @EnvironmentObject private var store: AppStore
     @State private var selectedFilter: EsportsLeagueFilter = .top
+    @State private var selectedTeam: String? = nil
+    @State private var showUpcomingSheet = false
+    @State private var upcomingSheetLeague = ""
+    @State private var selectedMatch: EsportsMatch? = nil
 
     private var availableFilters: [EsportsLeagueFilter] {
         let leagues = Array(Set(store.esportsMatches.map(\.league))).sorted()
         return [.top] + leagues.map(EsportsLeagueFilter.league)
     }
 
-    private var filteredMatches: [EsportsMatch] {
-        let base: [EsportsMatch]
+    private var leagueFilteredMatches: [EsportsMatch] {
         switch selectedFilter {
         case .top:
-            base = store.esportsMatches
+            return store.esportsMatches
         case .league(let league):
-            base = store.esportsMatches.filter { $0.league == league }
+            return store.esportsMatches.filter { $0.league == league }
         }
+    }
 
+    private var availableTeams: [String] {
+        let teams = leagueFilteredMatches.flatMap { [$0.homeTeam, $0.awayTeam] }
+        return Array(Set(teams)).sorted()
+    }
+
+    private var filteredMatches: [EsportsMatch] {
+        var base = leagueFilteredMatches
+        if let team = selectedTeam {
+            base = base.filter { $0.homeTeam == team || $0.awayTeam == team }
+        }
         return base.sorted { lhs, rhs in
             let lhsRank = statePriority(lhs.state)
             let rhsRank = statePriority(rhs.state)
@@ -84,14 +98,28 @@ struct EsportsView: View {
                 )
 
                 filterBar
+                teamFilterBar
                 scoresBoard
                 marketPulse
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
         }
+        .refreshable {
+            await store.refreshEsports()
+        }
         .navigationTitle("Esports")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: selectedFilter) { _, _ in
+            selectedTeam = nil
+        }
+        .sheet(isPresented: $showUpcomingSheet) {
+            UpcomingMatchesSheet(league: upcomingSheetLeague, matches: store.esportsMatches)
+        }
+        .sheet(item: $selectedMatch) { match in
+            MatchDetailView(match: match)
+                .environmentObject(store)
+        }
     }
 
     private var filterBar: some View {
@@ -129,6 +157,71 @@ struct EsportsView: View {
         }
     }
 
+    private var teamFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Button {
+                    selectedTeam = nil
+                } label: {
+                    Text("All Teams")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            selectedTeam == nil
+                                ? AppTheme.accentBlue.opacity(0.34)
+                                : Color.white.opacity(0.08),
+                            in: Capsule()
+                        )
+                        .overlay {
+                            Capsule()
+                                .stroke(
+                                    selectedTeam == nil
+                                        ? AppTheme.accentBlue.opacity(0.72)
+                                        : Color.white.opacity(0.10),
+                                    lineWidth: 1
+                                )
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show all teams")
+
+                ForEach(availableTeams, id: \.self) { team in
+                    Button {
+                        selectedTeam = team
+                    } label: {
+                        HStack(spacing: 5) {
+                            TeamLogoBadge(team: team)
+                            Text(team)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            selectedTeam == team
+                                ? AppTheme.accentBlue.opacity(0.34)
+                                : Color.white.opacity(0.08),
+                            in: Capsule()
+                        )
+                        .overlay {
+                            Capsule()
+                                .stroke(
+                                    selectedTeam == team
+                                        ? AppTheme.accentBlue.opacity(0.72)
+                                        : Color.white.opacity(0.10),
+                                    lineWidth: 1
+                                )
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Show \(team) matches")
+                }
+            }
+        }
+    }
+
     private var scoresBoard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -149,7 +242,12 @@ struct EsportsView: View {
                     Text("Featured Today")
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white.opacity(0.82))
-                    FeaturedMatchCard(match: featuredMatch)
+                    Button {
+                        selectedMatch = featuredMatch
+                    } label: {
+                        FeaturedMatchCard(match: featuredMatch)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -160,15 +258,26 @@ struct EsportsView: View {
                             .font(.subheadline.weight(.black))
                             .foregroundStyle(.white)
                         Spacer()
-                        Text("SEE ALL")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(AppTheme.accent.opacity(0.95))
+                        Button {
+                            upcomingSheetLeague = section.league
+                            showUpcomingSheet = true
+                        } label: {
+                            Text("SEE ALL")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(AppTheme.accent.opacity(0.95))
+                        }
+                        .buttonStyle(.plain)
                     }
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(section.matches) { match in
-                                CompactMatchCard(match: match)
+                                Button {
+                                    selectedMatch = match
+                                } label: {
+                                    CompactMatchCard(match: match)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -417,43 +526,119 @@ private struct CompactTeamRow: View {
     }
 }
 
-private struct TeamLogoBadge: View {
-    let team: String
+private struct UpcomingMatchesSheet: View {
+    let league: String
+    let matches: [EsportsMatch]
 
-    private var initials: String {
-        let letters = team.split(separator: " ").prefix(2).compactMap { $0.first.map(String.init) }.joined()
-        return letters.isEmpty ? "T" : letters
+    @Environment(\.dismiss) private var dismiss
+
+    private var upcomingMatches: [EsportsMatch] {
+        matches
+            .filter { $0.league == league && $0.state == .upcoming && $0.scheduledAt != nil }
+            .sorted { ($0.scheduledAt ?? .distantFuture) < ($1.scheduledAt ?? .distantFuture) }
+            .prefix(10)
+            .map { $0 }
     }
 
-    private var colors: [Color] {
-        switch team {
-        case "Sentinels":
-            return [Color(red: 0.84, green: 0.20, blue: 0.28), Color(red: 0.40, green: 0.07, blue: 0.09)]
-        case "Paper Rex":
-            return [Color(red: 0.10, green: 0.64, blue: 0.95), Color(red: 0.08, green: 0.30, blue: 0.68)]
-        case "T1", "G2":
-            return [Color(red: 0.95, green: 0.15, blue: 0.15), Color(red: 0.50, green: 0.04, blue: 0.04)]
-        case "Gen.G", "Liquid":
-            return [Color(red: 0.24, green: 0.55, blue: 0.96), Color(red: 0.10, green: 0.20, blue: 0.55)]
-        case "FaZe", "Fnatic":
-            return [Color(red: 0.98, green: 0.57, blue: 0.14), Color(red: 0.61, green: 0.30, blue: 0.04)]
-        default:
-            return [AppTheme.accentBlue, AppTheme.accent]
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground()
+                    .ignoresSafeArea()
+
+                if upcomingMatches.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.white.opacity(0.40))
+                        Text("No upcoming matches scheduled")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                } else {
+                    ScrollView {
+                        VStack(spacing: 10) {
+                            ForEach(upcomingMatches) { match in
+                                UpcomingMatchRow(match: match)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                    }
+                }
+            }
+            .navigationTitle("Upcoming · \(league)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(AppTheme.accent)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+private struct UpcomingMatchRow: View {
+    let match: EsportsMatch
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return f
+    }()
+
+    private func dateLabel(for date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return "Today · \(Self.timeFormatter.string(from: date))"
+        } else if calendar.isDateInTomorrow(date) {
+            return "Tomorrow · \(Self.timeFormatter.string(from: date))"
+        } else {
+            let dayFormatter = DateFormatter()
+            dayFormatter.dateFormat = "EEE, MMM d"
+            return "\(dayFormatter.string(from: date)) · \(Self.timeFormatter.string(from: date))"
         }
     }
 
     var body: some View {
-        Circle()
-            .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
-            .frame(width: 20, height: 20)
-            .overlay {
-                Text(initials)
-                    .font(.system(size: 8, weight: .black))
-                    .foregroundStyle(.white)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    TeamLogoBadge(team: match.awayTeam)
+                    Text(match.awayTeam)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+                HStack(spacing: 6) {
+                    TeamLogoBadge(team: match.homeTeam)
+                    Text(match.homeTeam)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
             }
-            .overlay {
-                Circle()
-                    .stroke(Color.white.opacity(0.24), lineWidth: 1)
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                if let date = match.scheduledAt {
+                    Text(dateLabel(for: date))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.accentBlue)
+                        .multilineTextAlignment(.trailing)
+                }
+                Text(match.subDetail)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.55))
             }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        }
     }
 }
+
