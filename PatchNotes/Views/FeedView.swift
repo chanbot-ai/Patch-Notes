@@ -1182,6 +1182,17 @@ private struct ReactionErrorToast: View {
     }
 }
 
+private enum ComposerMediaKind: String {
+    case image
+    case video
+}
+
+private struct ComposerMediaAttachment {
+    let url: URL
+    let thumbnailURL: URL?
+    let kind: ComposerMediaKind
+}
+
 private struct PostComposerView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var store: AppStore
@@ -1193,7 +1204,6 @@ private struct PostComposerView: View {
     @State private var bodyText = ""
     @State private var selectedGameID: UUID?
     @State private var mediaURLText = ""
-    @State private var thumbnailURLText = ""
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -1216,16 +1226,24 @@ private struct PostComposerView: View {
                 }
             }
 
-            Section("Media") {
-                TextField("Media URL (optional)", text: $mediaURLText)
+            Section("Media (optional)") {
+                TextField("Image or video URL", text: $mediaURLText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
 
-                TextField("Thumbnail URL (optional)", text: $thumbnailURLText)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
+                if let mediaAttachment {
+                    ComposerMediaPreview(attachment: mediaAttachment, height: 180)
+
+                    Button("Remove Media") {
+                        mediaURLText = ""
+                    }
+                    .foregroundStyle(.white.opacity(0.8))
+                } else if let mediaValidationMessage {
+                    Text(mediaValidationMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
             }
 
             Section {
@@ -1261,7 +1279,7 @@ private struct PostComposerView: View {
     }
 
     private var canSubmit: Bool {
-        !trimmedTitle.isEmpty || !trimmedBody.isEmpty || !trimmedMediaURL.isEmpty
+        !trimmedTitle.isEmpty || !trimmedBody.isEmpty || mediaAttachment != nil
     }
 
     private var availableGames: [Game] {
@@ -1285,8 +1303,16 @@ private struct PostComposerView: View {
         mediaURLText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var trimmedThumbnailURL: String {
-        thumbnailURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var mediaAttachment: ComposerMediaAttachment? {
+        guard let url = normalizeMediaURL(trimmedMediaURL) else { return nil }
+        guard let kind = inferMediaKind(url: url) else { return nil }
+        let thumbnailURL = inferThumbnailURL(for: url, kind: kind)
+        return ComposerMediaAttachment(url: url, thumbnailURL: thumbnailURL, kind: kind)
+    }
+
+    private var mediaValidationMessage: String? {
+        guard !trimmedMediaURL.isEmpty else { return nil }
+        return mediaAttachment == nil ? "Enter a valid image or video URL." : nil
     }
 
     private func save() {
@@ -1296,6 +1322,10 @@ private struct PostComposerView: View {
         }
 
         guard canSubmit else { return }
+        if !trimmedMediaURL.isEmpty, mediaAttachment == nil {
+            errorMessage = "Please enter a valid image or video URL."
+            return
+        }
 
         Task {
             isSaving = true
@@ -1308,8 +1338,7 @@ private struct PostComposerView: View {
                     linkedGame: availableGames.first(where: { $0.id == selectedGameID }),
                     title: trimmedTitle.isEmpty ? nil : trimmedTitle,
                     body: trimmedBody.isEmpty ? nil : trimmedBody,
-                    mediaURL: trimmedMediaURL.isEmpty ? nil : trimmedMediaURL,
-                    thumbnailURL: trimmedThumbnailURL.isEmpty ? nil : trimmedThumbnailURL
+                    mediaAttachment: mediaAttachment
                 )
                 onPostCreated()
                 dismiss()
@@ -1317,6 +1346,74 @@ private struct PostComposerView: View {
                 errorMessage = service.friendlyMessage(for: error)
             }
         }
+    }
+
+    private func normalizeMediaURL(_ raw: String) -> URL? {
+        guard !raw.isEmpty else { return nil }
+        if let url = URL(string: raw), url.scheme != nil {
+            return url
+        }
+        return URL(string: "https://\(raw)")
+    }
+
+    private func inferMediaKind(url: URL) -> ComposerMediaKind? {
+        if YouTubeIDParser.videoID(from: url) != nil {
+            return .video
+        }
+        let ext = url.pathExtension.lowercased()
+        if ["mp4", "mov", "m4v", "webm"].contains(ext) {
+            return .video
+        }
+        if ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif"].contains(ext) {
+            return .image
+        }
+        return nil
+    }
+
+    private func inferThumbnailURL(for url: URL, kind: ComposerMediaKind) -> URL? {
+        if kind == .video, let id = YouTubeIDParser.videoID(from: url) {
+            return URL(string: "https://img.youtube.com/vi/\(id)/hqdefault.jpg")
+        }
+        if kind == .image {
+            return url
+        }
+        return nil
+    }
+}
+
+private struct ComposerMediaPreview: View {
+    let attachment: ComposerMediaAttachment
+    var height: CGFloat = 180
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.black.opacity(0.28))
+                .frame(height: height)
+
+            switch attachment.kind {
+            case .image:
+                RemoteMediaImage(primaryURL: attachment.url, fallbackURL: MediaFallback.gameScreenshot)
+                    .frame(height: height)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            case .video:
+                let previewURL = attachment.thumbnailURL ?? attachment.url
+                RemoteMediaImage(primaryURL: previewURL, fallbackURL: MediaFallback.videoThumbnail)
+                    .frame(height: height)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: height * 0.3, weight: .bold))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.45), radius: 8, y: 3)
+                    }
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -1339,8 +1436,7 @@ private struct PostComposerService {
         linkedGame: Game?,
         title: String?,
         body: String?,
-        mediaURL: String?,
-        thumbnailURL: String?
+        mediaAttachment: ComposerMediaAttachment?
     ) async throws {
         let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !accessToken.isEmpty else {
@@ -1356,9 +1452,9 @@ private struct PostComposerService {
             try await feedService.ensureGameExists(linkedGame, accessToken: accessToken)
         }
 
-        let resolvedMediaURL = sanitizedURLString(mediaURL)
-        let resolvedThumbnailURL = sanitizedURLString(thumbnailURL) ?? inferredThumbnailURL(for: resolvedMediaURL)
-        let resolvedType = resolvedPostType(mediaURL: resolvedMediaURL)
+        let resolvedMediaURL = mediaAttachment?.url.absoluteString
+        let resolvedThumbnailURL = mediaAttachment?.thumbnailURL?.absoluteString
+        let resolvedType = mediaAttachment?.kind.rawValue ?? "text"
 
         try await client
             .from("posts")
@@ -1393,36 +1489,4 @@ private struct PostComposerService {
         return error.localizedDescription
     }
 
-    private func sanitizedURLString(_ raw: String?) -> String? {
-        guard let raw, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return URL(string: trimmed) == nil ? nil : trimmed
-    }
-
-    private func resolvedPostType(mediaURL: String?) -> String {
-        guard let mediaURL,
-              let url = URL(string: mediaURL) else {
-            return "text"
-        }
-        if YouTubeIDParser.videoID(from: url) != nil {
-            return "video"
-        }
-        let pathExtension = url.pathExtension.lowercased()
-        if ["mp4", "mov", "m4v", "webm"].contains(pathExtension) {
-            return "video"
-        }
-        if ["jpg", "jpeg", "png", "gif", "webp", "heic"].contains(pathExtension) {
-            return "image"
-        }
-        return "image"
-    }
-
-    private func inferredThumbnailURL(for mediaURL: String?) -> String? {
-        guard let mediaURL,
-              let url = URL(string: mediaURL) else { return nil }
-        if let videoID = YouTubeIDParser.videoID(from: url) {
-            return "https://img.youtube.com/vi/\(videoID)/hqdefault.jpg"
-        }
-        return nil
-    }
 }

@@ -6,19 +6,17 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Post media previews + composer media inputs
+- Last milestone: Composer media enrichment + validation
 
 ## Latest Milestone
 
 ### Summary
 
-- Added post media preview rendering in feed rows and comment detail headers, including video thumbnail treatment.
-- Extended the post composer to accept optional media + thumbnail URLs, infer post type, and infer YouTube thumbnails.
-- Added post model helpers to normalize content type and media/thumbnail URLs.
+- Refined the post composer media flow: single media URL input, auto validation, YouTube thumbnail inference, and inline preview with quick removal.
+- Composer now blocks invalid media URLs and posts media-only entries with the proper `image`/`video` type.
 
 ### Files Touched
 
-- `PatchNotes/Model/Post.swift`
 - `PatchNotes/Views/FeedView.swift`
 - `ASYNC_AGENT_HANDOFF.md`
 
@@ -32,7 +30,7 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 ### Open Risks / Notes
 
-- Media URLs are accepted as raw strings; invalid URLs are ignored during insert.
+- None beyond the usual media URL validation depending on user input quality.
 
 ## Next Recommended Action
 
