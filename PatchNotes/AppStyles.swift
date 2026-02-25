@@ -701,3 +701,34 @@ struct TeamLogoBadge: View {
         }
     }
 }
+
+struct LivePulseDot: View {
+    @State private var pulsing = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.red.opacity(0.35))
+                .frame(width: 12, height: 12)
+                .scaleEffect(pulsing ? 1.8 : 1)
+                .opacity(pulsing ? 0 : 0.8)
+            Circle()
+                .fill(Color.red)
+                .frame(width: 6, height: 6)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 1.2).repeatForever(autoreverses: false)) {
+                pulsing = true
+            }
+        }
+    }
+}
+
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .opacity(configuration.isPressed ? 0.80 : 1)
+            .animation(.spring(duration: 0.2), value: configuration.isPressed)
+    }
+}

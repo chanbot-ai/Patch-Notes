@@ -111,7 +111,9 @@ struct EsportsView: View {
         .navigationTitle("Esports")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: selectedFilter) { _, _ in
-            selectedTeam = nil
+            withAnimation(.spring(duration: 0.25)) {
+                selectedTeam = nil
+            }
         }
         .sheet(isPresented: $showUpcomingSheet) {
             UpcomingMatchesSheet(league: upcomingSheetLeague, matches: store.esportsMatches)
@@ -119,6 +121,7 @@ struct EsportsView: View {
         .sheet(item: $selectedMatch) { match in
             MatchDetailView(match: match)
                 .environmentObject(store)
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -219,6 +222,7 @@ struct EsportsView: View {
                     .accessibilityLabel("Show \(team) matches")
                 }
             }
+            .animation(.spring(duration: 0.3), value: availableTeams)
         }
     }
 
@@ -237,6 +241,19 @@ struct EsportsView: View {
 
             LiveTickerView(matches: tickerMatches)
 
+            if filteredMatches.isEmpty, let team = selectedTeam {
+                VStack(spacing: 10) {
+                    Image(systemName: "sportscourt")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.white.opacity(0.35))
+                    Text("No matches for \(team)")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.50))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            }
+
             if let featuredMatch {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Featured Today")
@@ -247,7 +264,7 @@ struct EsportsView: View {
                     } label: {
                         FeaturedMatchCard(match: featuredMatch)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressableButtonStyle())
                 }
             }
 
@@ -262,8 +279,8 @@ struct EsportsView: View {
                             upcomingSheetLeague = section.league
                             showUpcomingSheet = true
                         } label: {
-                            Text("SEE ALL")
-                                .font(.caption2.weight(.bold))
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
                                 .foregroundStyle(AppTheme.accent.opacity(0.95))
                         }
                         .buttonStyle(.plain)
@@ -271,15 +288,33 @@ struct EsportsView: View {
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(section.matches) { match in
-                                Button {
-                                    selectedMatch = match
-                                } label: {
-                                    CompactMatchCard(match: match)
+                            let liveMatches = section.matches.filter { $0.state == .live }
+                            let upcomingMatches = section.matches.filter { $0.state == .upcoming }
+                            let finalMatches = section.matches.filter { $0.state == .final }
+
+                            if !liveMatches.isEmpty {
+                                MatchStateGroupLabel(title: "LIVE", color: .red, isLive: true)
+                                ForEach(liveMatches) { match in
+                                    Button { selectedMatch = match } label: { CompactMatchCard(match: match) }
+                                        .buttonStyle(PressableButtonStyle())
                                 }
-                                .buttonStyle(.plain)
+                            }
+                            if !upcomingMatches.isEmpty {
+                                MatchStateGroupLabel(title: "UPCOMING", color: AppTheme.accentBlue, isLive: false)
+                                ForEach(upcomingMatches) { match in
+                                    Button { selectedMatch = match } label: { CompactMatchCard(match: match) }
+                                        .buttonStyle(PressableButtonStyle())
+                                }
+                            }
+                            if !finalMatches.isEmpty {
+                                MatchStateGroupLabel(title: "FINAL", color: .white.opacity(0.55), isLive: false)
+                                ForEach(finalMatches) { match in
+                                    Button { selectedMatch = match } label: { CompactMatchCard(match: match) }
+                                        .buttonStyle(PressableButtonStyle())
+                                }
                             }
                         }
+                        .padding(.vertical, 4)
                     }
                 }
             }
@@ -303,7 +338,7 @@ struct EsportsView: View {
     private var marketPulse: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Market Pulse")
+                Label("Market Pulse", systemImage: "chart.line.uptrend.xyaxis")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
 
@@ -424,12 +459,17 @@ private struct FeaturedMatchCard: View {
     }
 
     private var matchStatePill: some View {
-        Text(match.detailLine)
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(stateColor)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(stateColor.opacity(0.16), in: Capsule())
+        HStack(spacing: 5) {
+            if match.state == .live {
+                LivePulseDot()
+            }
+            Text(match.detailLine)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(stateColor)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(stateColor.opacity(0.16), in: Capsule())
     }
 
     private var stateColor: Color {
@@ -450,6 +490,9 @@ private struct CompactMatchCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
+                if match.state == .live {
+                    LivePulseDot()
+                }
                 Text(match.detailLine)
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(stateColor)
@@ -503,6 +546,8 @@ private struct TeamScoreRow: View {
             Text("\(score)")
                 .font(.title3.weight(.black))
                 .foregroundStyle(.white)
+                .contentTransition(.numericText())
+                .animation(.spring(duration: 0.5), value: score)
         }
     }
 }
@@ -522,6 +567,8 @@ private struct CompactTeamRow: View {
             Text("\(score)")
                 .font(.caption.weight(.black))
                 .foregroundStyle(.white)
+                .contentTransition(.numericText())
+                .animation(.spring(duration: 0.5), value: score)
         }
     }
 }
@@ -577,6 +624,28 @@ private struct UpcomingMatchesSheet: View {
             }
         }
         .preferredColorScheme(.dark)
+    }
+}
+
+private struct MatchStateGroupLabel: View {
+    let title: String
+    let color: Color
+    let isLive: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if isLive { LivePulseDot() }
+            Text(title)
+                .font(.caption2.weight(.black))
+                .foregroundStyle(color)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 6)
+        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(color.opacity(0.25), lineWidth: 0.5)
+        }
     }
 }
 

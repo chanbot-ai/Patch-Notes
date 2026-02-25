@@ -69,6 +69,8 @@ private struct MatchHeaderSection: View {
                             .font(.system(size: 28, weight: .black))
                             .foregroundStyle(.white)
                             .minimumScaleFactor(0.7)
+                            .contentTransition(.numericText())
+                            .animation(.spring(duration: 0.5), value: match.awayScore + match.homeScore)
                     }
                     statePill
                 }
