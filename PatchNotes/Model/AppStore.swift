@@ -281,12 +281,20 @@ final class AppStore: ObservableObject {
 
     func setAuthenticatedSession(_ session: Session?) {
         let previousUserID = authenticatedSession?.user.id
+        let previousAccessToken = authenticatedSession?.accessToken
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         authenticatedSession = session
         let newUserID = session?.user.id
+        let newAccessToken = session?.accessToken
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let didRotateAccessToken = previousUserID == newUserID && previousAccessToken != newAccessToken
 
-        if previousUserID != newUserID {
+        if previousUserID != newUserID || didRotateAccessToken {
             hasSubscribedToNotifications = false
             feedService.resetNotificationsSubscription()
+        }
+
+        if previousUserID != newUserID {
             pendingNotificationsRefreshTask?.cancel()
             pendingNotificationsRefreshTask = nil
             notifications = []
@@ -296,6 +304,12 @@ final class AppStore: ObservableObject {
             followedGameIDs = []
             followedGamesErrorMessage = nil
             followedGamesIsLoading = false
+        }
+
+        if didRotateAccessToken,
+           newUserID != nil,
+           notificationsErrorMessage != nil {
+            loadNotifications()
         }
 
         if session == nil {
@@ -799,7 +813,20 @@ final class AppStore: ObservableObject {
             notifications = fetched
             await refreshNotificationActorProfiles(for: fetched)
         } catch {
-            notificationsErrorMessage = error.localizedDescription
+            if isNotificationsAuthError(error),
+               syncAuthenticatedSessionFromSupabaseIfNeeded(expectedUserID: session.user.id) {
+                hasSubscribedToNotifications = false
+                feedService.resetNotificationsSubscription()
+                await refreshNotifications()
+                return
+            }
+
+            if isNotificationsAuthError(error) {
+                hasSubscribedToNotifications = false
+                feedService.resetNotificationsSubscription()
+            }
+
+            notificationsErrorMessage = friendlyNotificationsErrorMessage(for: error)
             print("Error loading notifications:", error)
         }
     }
@@ -1031,6 +1058,44 @@ final class AppStore: ObservableObject {
             return "Couldn’t update reaction. Check your connection and try again."
         }
         return "Couldn’t update reaction right now. Try again."
+    }
+
+    private func syncAuthenticatedSessionFromSupabaseIfNeeded(expectedUserID: UUID) -> Bool {
+        guard let latest = SupabaseManager.shared.client.auth.currentSession,
+              latest.user.id == expectedUserID else { return false }
+
+        let currentToken = authenticatedSession?.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let latestToken = latest.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !latestToken.isEmpty, currentToken != latestToken else { return false }
+
+        setAuthenticatedSession(latest)
+        return true
+    }
+
+    private func isNotificationsAuthError(_ error: Error) -> Bool {
+        let raw = [error.localizedDescription, String(describing: error)]
+            .joined(separator: " | ")
+            .lowercased()
+        return raw.contains("jwt expired")
+            || raw.contains("token is expired")
+            || raw.contains("invalid jwt")
+            || raw.contains("401")
+            || raw.contains("unauthorized")
+            || raw.contains("sub")
+    }
+
+    private func friendlyNotificationsErrorMessage(for error: Error) -> String {
+        if isNotificationsAuthError(error) {
+            return "Your session expired while loading notifications. Pull to refresh or reopen after re-auth."
+        }
+
+        let raw = [error.localizedDescription, String(describing: error)]
+            .joined(separator: " | ")
+            .lowercased()
+        if raw.contains("network") || raw.contains("offline") {
+            return "Couldn’t load notifications. Check your connection and try again."
+        }
+        return "Couldn’t load notifications right now. Try again."
     }
 
     private func refreshLoadedComments(for postId: UUID) async {

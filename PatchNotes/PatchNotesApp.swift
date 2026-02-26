@@ -6,6 +6,12 @@ struct PatchNotesApp: App {
     @StateObject private var settings = AppSettings()
     @StateObject private var authManager = AuthManager()
 
+    private var authSessionSyncKey: String {
+        let userID = authManager.session?.user.id.uuidString ?? "no-user"
+        let token = authManager.session?.accessToken ?? "no-token"
+        return "\(userID)|\(token)"
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
@@ -23,9 +29,9 @@ struct PatchNotesApp: App {
                     guard authManager.session != nil else { return }
                     store.startHotFeed()
                 }
-                .onChange(of: authManager.session?.user.id) { _, userID in
+                .onChange(of: authSessionSyncKey) { _, _ in
                     store.setAuthenticatedSession(authManager.session)
-                    guard userID != nil else { return }
+                    guard authManager.session?.user.id != nil else { return }
                     store.startHotFeed()
                 }
         }
