@@ -6,43 +6,43 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Batch 4 client wiring for cached X Pulse feed (`tweets_cache_feed_view`)
+- Last milestone: Batch 5 cron + budget guardrails scaffold for `syncTweets`
 
 ## Latest Milestone
 
 ### Summary
 
-- Completed the Batch 4 client-side cache read path by replacing `SocialView`'s hardcoded `X Pulse` sample tweets with Supabase-backed reads from `public.tweets_cache_feed_view`.
-- Added `FeedService.fetchCachedTweets(...)` with typed decoding for `tweets_cache_feed_view` rows (`metrics`, canonical URL, author/source handles, publish time).
-- Added `SocialView` X Pulse loading/error/retry/empty states and local game-title relevance matching so cached tweets filter by the selected social game.
-- Marked Batch 4 as done in the backlog from a code-delivery perspective (operational apply/deploy/live-sync validation still pending outside sandbox).
+- Started Batch 5 (cron sync + budget guardrails) by extending `supabase/functions/syncTweets` with env-driven per-run caps: `perHandleLimit`, `maxHandles`, and `maxTotalTweets` (with request body overrides clamped to env caps).
+- Added source-handle filtering support via `TWITTER_SYNC_SOURCE_FILTER_HANDLES`, combined with `TWITTER_SYNC_ALLOWED_HANDLES`, plus in-run duplicate suppression before the existing idempotent upsert.
+- Added richer sync response telemetry (`skippedHandles`, `budgetStopped`, `totalFetched`) to make cron/budget tuning easier during dry runs and first deployments.
+- Added a new migration scaffold that creates `public.purge_old_tweets_cache(...)` and attempts idempotent cron scheduling for a 30-minute `syncTweets` call and daily >30d cache cleanup when `cron`/`net` extensions and `app.settings.supabase_url` are available.
 
 ### Files Touched
 
-- `PatchNotes/FeedService.swift`
-- `PatchNotes/Views/SocialView.swift`
+- `supabase/functions/syncTweets/index.ts`
+- `supabase/migrations/20260226151000_add_tweets_cache_cron_and_retention.sql`
 - `ASYNC_AGENT_BACKLOG.md`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
 
-- `supabase/migrations/20260226142000_create_tweets_cache_and_feed_view.sql` (created, not applied in this sandbox)
+- `supabase/migrations/20260226142000_create_tweets_cache_and_feed_view.sql` (created previously, not applied in this sandbox)
+- `supabase/migrations/20260226151000_add_tweets_cache_cron_and_retention.sql` (created, not applied in this sandbox)
 
 ### Verification
 
-- `xcodebuild -scheme PatchNotes -destination 'platform=iOS Simulator,name=iPhone 15' -configuration Debug -derivedDataPath /tmp/patchnotes-derived build` (with `/tmp` HOME/cache overrides) failed in sandbox:
-  - CoreSimulator service unavailable/connection invalid in this environment
-  - SwiftPM package resolution blocked by `github.com` DNS/network restriction before compile
-- Static code verification:
-  - reviewed `FeedService.fetchCachedTweets(...)` query/decoder mapping against `tweets_cache_feed_view`
-  - reviewed `SocialView` X Pulse state transitions (loading/error/retry/empty/filtering) for cached feed usage
+- Backend-only milestone (`supabase` function + SQL migration scaffold); no Swift/iOS files changed, so `xcodebuild` was not rerun.
+- Static verification only (sandbox lacks `supabase` CLI / `deno` / `node`, and network is restricted):
+  - reviewed `syncTweets` guardrail flow (env parsing, request clamps, handle filtering, total-budget request sizing, in-run dedupe)
+  - reviewed migration SQL for retention function permissions and cron scheduling guards/no-op behavior when `cron`/`net`/`app.settings.supabase_url` are unavailable
 
 ### Open Risks / Notes
 
 - `syncTweets` uses a best-effort defensive parser for likely `twitterapi.io` response shapes; endpoint path/fields may need adjustment against the actual provider schema during first live run.
+- Cron migration assumes Supabase project settings expose `app.settings.supabase_url` (and optionally `app.settings.sync_tweets_webhook_secret`) plus installed `cron`/`net` extensions; if not, it intentionally emits notices and skips scheduling.
 - This automation worktree cannot check out `codex/async-dev` directly because that branch is already attached to another local worktree, so work was performed on a detached `HEAD` aligned to `origin/codex/async-dev` and should be pushed back to `codex/async-dev`.
-- Live validation is still pending outside sandbox: migration apply, function deploy, first cache sync, and UI validation with real cached tweets.
+- Live validation is still pending outside sandbox: apply both tweets-cache migrations, deploy `syncTweets`, confirm scheduled jobs, and observe first sync/retention runs.
 
 ## Next Recommended Action
 
-- In a full Supabase/dev environment, apply `20260226142000_create_tweets_cache_and_feed_view.sql`, deploy `syncTweets` with `TWITTERAPI_IO_API_KEY` + `SUPABASE_SERVICE_ROLE_KEY` (and optional allowlist/secret envs), run an initial sync, then validate `SocialView` X Pulse renders/filtering from `public.tweets_cache_feed_view`.
+- In a full Supabase/dev environment, apply `20260226142000_create_tweets_cache_and_feed_view.sql` and `20260226151000_add_tweets_cache_cron_and_retention.sql`, deploy `syncTweets` with `TWITTERAPI_IO_API_KEY` + `SUPABASE_SERVICE_ROLE_KEY` and the new guardrail envs, confirm cron jobs exist, then run/observe a dry run + first real sync.

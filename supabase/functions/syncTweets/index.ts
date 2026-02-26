@@ -3,6 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 type SyncRequest = {
   handles?: string[];
   perHandleLimit?: number;
+  maxHandles?: number;
+  maxTotalTweets?: number;
   dryRun?: boolean;
 };
 
@@ -49,6 +51,16 @@ function parseAllowedHandles(raw: string | undefined): Set<string> {
       .map(cleanHandle)
       .filter((value) => value.length > 0),
   );
+}
+
+function parsePositiveIntEnv(name: string): number | null {
+  const raw = Deno.env.get(name)?.trim();
+  if (!raw) return null;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Invalid positive integer env for ${name}: ${raw}`);
+  }
+  return parsed;
 }
 
 function coerceString(
@@ -281,6 +293,19 @@ Deno.serve(async (request) => {
     const allowedHandles = parseAllowedHandles(
       Deno.env.get("TWITTER_SYNC_ALLOWED_HANDLES"),
     );
+    const sourceFilterHandles = parseAllowedHandles(
+      Deno.env.get("TWITTER_SYNC_SOURCE_FILTER_HANDLES"),
+    );
+    const combinedAllowedHandles = new Set([
+      ...allowedHandles,
+      ...sourceFilterHandles,
+    ]);
+    const defaultPerHandleLimit = parsePositiveIntEnv("TWITTER_SYNC_DEFAULT_PER_HANDLE_LIMIT") ?? 10;
+    const maxPerHandleLimit = parsePositiveIntEnv("TWITTER_SYNC_MAX_PER_HANDLE_LIMIT") ?? 20;
+    const defaultMaxHandlesPerRun = parsePositiveIntEnv("TWITTER_SYNC_DEFAULT_MAX_HANDLES_PER_RUN") ?? 6;
+    const maxHandlesPerRunCap = parsePositiveIntEnv("TWITTER_SYNC_MAX_HANDLES_PER_RUN_CAP") ?? 20;
+    const defaultMaxTotalTweetsPerRun = parsePositiveIntEnv("TWITTER_SYNC_DEFAULT_MAX_TOTAL_TWEETS_PER_RUN") ?? 60;
+    const maxTotalTweetsPerRunCap = parsePositiveIntEnv("TWITTER_SYNC_MAX_TOTAL_TWEETS_PER_RUN_CAP") ?? 200;
 
     const body = ((await request.json().catch(() => ({}))) ?? {}) as SyncRequest;
     const requestedHandles = (body.handles ?? [])
@@ -288,7 +313,7 @@ Deno.serve(async (request) => {
       .filter((value) => value.length > 0);
     const handles = (requestedHandles.length > 0
       ? requestedHandles
-      : Array.from(allowedHandles)).filter((value, index, array) =>
+      : Array.from(combinedAllowedHandles)).filter((value, index, array) =>
         array.indexOf(value) === index
       );
 
@@ -301,8 +326,8 @@ Deno.serve(async (request) => {
       }, 400);
     }
 
-    if (allowedHandles.size > 0) {
-      const unauthorized = handles.filter((handle) => !allowedHandles.has(handle));
+    if (combinedAllowedHandles.size > 0) {
+      const unauthorized = handles.filter((handle) => !combinedAllowedHandles.has(handle));
       if (unauthorized.length > 0) {
         return json({
           ok: false,
@@ -313,17 +338,46 @@ Deno.serve(async (request) => {
       }
     }
 
-    const perHandleLimit = clamp(body.perHandleLimit ?? 10, 1, 50);
+    const maxHandles = clamp(
+      body.maxHandles ?? defaultMaxHandlesPerRun,
+      1,
+      maxHandlesPerRunCap,
+    );
+    const selectedHandles = handles.slice(0, maxHandles);
+    const skippedHandles = handles.slice(maxHandles);
+    const perHandleLimit = clamp(body.perHandleLimit ?? defaultPerHandleLimit, 1, maxPerHandleLimit);
+    const maxTotalTweets = clamp(
+      body.maxTotalTweets ?? defaultMaxTotalTweetsPerRun,
+      1,
+      maxTotalTweetsPerRunCap,
+    );
     const nowISO = new Date().toISOString();
     const normalizedRows: NormalizedTweet[] = [];
+    const dedupeKeys = new Set<string>();
     const fetchStats: Array<{ handle: string; fetched: number; normalized: number }> = [];
+    let totalFetched = 0;
+    let budgetStopped = false;
 
-    for (const handle of handles) {
-      const rawTweets = await fetchTweetsForHandle(handle, perHandleLimit, twitterAPIKey);
+    for (const handle of selectedHandles) {
+      if (normalizedRows.length >= maxTotalTweets) {
+        budgetStopped = true;
+        break;
+      }
+      const remainingBudget = Math.max(maxTotalTweets - normalizedRows.length, 1);
+      const requestCount = Math.min(perHandleLimit, remainingBudget);
+      const rawTweets = await fetchTweetsForHandle(handle, requestCount, twitterAPIKey);
       let normalizedCount = 0;
+      totalFetched += rawTweets.length;
       for (const rawTweet of rawTweets) {
+        if (normalizedRows.length >= maxTotalTweets) {
+          budgetStopped = true;
+          break;
+        }
         const normalized = normalizeTweet(rawTweet, handle, nowISO);
         if (!normalized) continue;
+        const dedupeKey = `${normalized.provider}:${normalized.provider_post_id}`;
+        if (dedupeKeys.has(dedupeKey)) continue;
+        dedupeKeys.add(dedupeKey);
         normalizedRows.push(normalized);
         normalizedCount += 1;
       }
@@ -339,9 +393,14 @@ Deno.serve(async (request) => {
         ok: true,
         requestId: requestID,
         dryRun: true,
-        handles,
+        handles: selectedHandles,
+        skippedHandles,
         perHandleLimit,
+        maxHandles,
+        maxTotalTweets,
+        budgetStopped,
         stats: fetchStats,
+        totalFetched,
         wouldUpsert: normalizedRows.length,
       });
     }
@@ -362,9 +421,14 @@ Deno.serve(async (request) => {
     return json({
       ok: true,
       requestId: requestID,
-      handles,
+      handles: selectedHandles,
+      skippedHandles,
       perHandleLimit,
+      maxHandles,
+      maxTotalTweets,
+      budgetStopped,
       stats: fetchStats,
+      totalFetched,
       upserted: normalizedRows.length,
     });
   } catch (error) {
