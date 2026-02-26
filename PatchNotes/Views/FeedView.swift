@@ -203,6 +203,7 @@ struct FeedView: View {
             NavigationStack {
                 PostComposerView {
                     store.loadHotFeed()
+                    store.loadFollowingFeed()
                 }
                 .environmentObject(authManager)
                 .environmentObject(store)
