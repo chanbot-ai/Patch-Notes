@@ -236,6 +236,15 @@ struct EsportsMatch: Identifiable, Hashable {
         self.scheduledAt = scheduledAt
         self.streamURL = streamURL
     }
+
+    /// Stable notification identifier derived from match content rather than the
+    /// ephemeral UUID, so scheduled reminders survive data refreshes.
+    var notificationIdentifier: String {
+        let epoch = scheduledAt.map { Int($0.timeIntervalSince1970) } ?? 0
+        return "match-\(league)-\(homeTeam)-\(awayTeam)-\(epoch)"
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "_")
+    }
 }
 
 struct LeagueStanding: Identifiable, Hashable {

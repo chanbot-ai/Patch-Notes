@@ -579,7 +579,10 @@ final class AppStore: ObservableObject {
     func refreshEsports() async {
         isLoadingEsports = true
         try? await Task.sleep(for: .milliseconds(700))
-        refresh()
+        let seed = dataProvider.makeSeedData(referenceDate: Date())
+        esportsMatches = seed.esportsMatches
+        esportsMarkets = seed.esportsMarkets
+        leagueStandings = seed.leagueStandings
         isLoadingEsports = false
     }
     

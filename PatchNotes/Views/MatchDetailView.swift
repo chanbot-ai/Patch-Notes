@@ -8,7 +8,11 @@ struct MatchDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var matchMarkets: [EsportsMarket] {
-        store.esportsMarkets.filter { $0.league == match.league }
+        let teams: Set<String> = [match.homeTeam, match.awayTeam]
+        return store.esportsMarkets.filter { market in
+            market.league == match.league &&
+            market.outcomes.contains { teams.contains($0.teamName) }
+        }
     }
 
     var body: some View {
@@ -372,6 +376,12 @@ private struct MatchRemindMeButton: View {
             }
         }
         .disabled(reminderSet)
+        .onAppear {
+            UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
+                let isScheduled = requests.contains { $0.identifier == match.notificationIdentifier }
+                if isScheduled { DispatchQueue.main.async { reminderSet = true } }
+            }
+        }
         .alert("Notifications Disabled", isPresented: $showPermissionAlert) {
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -417,7 +427,7 @@ private struct MatchRemindMeButton: View {
         )
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
         let request = UNNotificationRequest(
-            identifier: "match-\(match.id.uuidString)",
+            identifier: match.notificationIdentifier,
             content: content,
             trigger: trigger
         )

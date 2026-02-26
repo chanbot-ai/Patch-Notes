@@ -1000,6 +1000,12 @@ private struct UpcomingMatchRow: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.white.opacity(0.10), lineWidth: 1)
         }
+        .onAppear {
+            UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
+                let isScheduled = requests.contains { $0.identifier == match.notificationIdentifier }
+                if isScheduled { DispatchQueue.main.async { reminderSet = true } }
+            }
+        }
         .alert("Notifications Disabled", isPresented: $showPermissionAlert) {
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -1045,7 +1051,7 @@ private struct UpcomingMatchRow: View {
         )
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
         let request = UNNotificationRequest(
-            identifier: "match-\(match.id.uuidString)",
+            identifier: match.notificationIdentifier,
             content: content,
             trigger: trigger
         )
