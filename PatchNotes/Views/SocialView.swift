@@ -111,19 +111,25 @@ struct SocialView: View {
                             Button {
                                 selectedGameID = game.id
                             } label: {
-                                Text(game.title)
-                                    .font(.subheadline.weight(.bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 9)
-                                    .background(
-                                        (selectedGame?.id == game.id ? AppTheme.accent.opacity(0.34) : Color.white.opacity(0.10)),
-                                        in: Capsule()
-                                    )
-                                    .overlay {
-                                        Capsule()
-                                            .stroke(Color.white.opacity(selectedGame?.id == game.id ? 0.45 : 0.15), lineWidth: 1)
+                                HStack(spacing: 6) {
+                                    Text(game.title)
+                                    if store.isFollowingGame(game) {
+                                        Image(systemName: "bell.fill")
+                                            .font(.caption.bold())
                                     }
+                                }
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 9)
+                                .background(
+                                    (selectedGame?.id == game.id ? AppTheme.accent.opacity(0.34) : Color.white.opacity(0.10)),
+                                    in: Capsule()
+                                )
+                                .overlay {
+                                    Capsule()
+                                        .stroke(Color.white.opacity(selectedGame?.id == game.id ? 0.45 : 0.15), lineWidth: 1)
+                                }
                             }
                             .buttonStyle(.plain)
                         }

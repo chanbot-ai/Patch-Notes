@@ -305,7 +305,7 @@ struct YouTubeInlinePlayer: UIViewRepresentable {
     }
 
     private func embedHTML(videoID: String) -> String {
-        """
+        return """
         <!doctype html>
         <html>
         <head>
@@ -370,6 +370,7 @@ enum EmbeddedVideoSourceResolver {
 
 struct EmbeddedVideoPlayer: UIViewRepresentable {
     let source: EmbeddedVideoSource
+    var mutedAutoplay: Bool = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -390,19 +391,29 @@ struct EmbeddedVideoPlayer: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        guard context.coordinator.loadedKey != source.cacheKey else { return }
-        context.coordinator.loadedKey = source.cacheKey
+        let cacheKey = "\(source.cacheKey)|mutedAutoplay:\(mutedAutoplay)"
+        guard context.coordinator.loadedKey != cacheKey else { return }
+        context.coordinator.loadedKey = cacheKey
 
         switch source {
         case .youtube(let videoID):
-            uiView.loadHTMLString(youtubeHTML(videoID: videoID), baseURL: URL(string: "https://www.youtube.com"))
+            uiView.loadHTMLString(
+                youtubeHTML(videoID: videoID, mutedAutoplay: mutedAutoplay),
+                baseURL: URL(string: "https://www.youtube.com")
+            )
         case .web(let url):
             uiView.load(URLRequest(url: url))
         }
     }
 
-    private func youtubeHTML(videoID: String) -> String {
-        """
+    private func youtubeHTML(videoID: String, mutedAutoplay: Bool) -> String {
+        let query: String
+        if mutedAutoplay {
+            query = "playsinline=1&autoplay=1&mute=1&controls=0&rel=0&modestbranding=1&loop=1&playlist=\(videoID)"
+        } else {
+            query = "playsinline=1&autoplay=1&controls=1&rel=0&modestbranding=1"
+        }
+        return """
         <!doctype html>
         <html>
         <head>
@@ -427,7 +438,7 @@ struct EmbeddedVideoPlayer: UIViewRepresentable {
         </head>
         <body>
           <iframe
-            src="https://www.youtube.com/embed/\(videoID)?playsinline=1&autoplay=1&controls=1&rel=0&modestbranding=1"
+            src="https://www.youtube.com/embed/\(videoID)?\(query)"
             allow="autoplay; encrypted-media; picture-in-picture; web-share"
             allowfullscreen>
           </iframe>

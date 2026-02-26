@@ -23,7 +23,11 @@ struct MyGamesView: View {
                                 NavigationLink {
                                     GameReleaseDetailView(game: game)
                                 } label: {
-                                    OwnedGameTile(game: game)
+                                    OwnedGameTile(game: game, isFollowing: store.isFollowingGame(game))
+                                        .overlay(alignment: .topTrailing) {
+                                            FollowToggleButton(game: game)
+                                                .padding(10)
+                                        }
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("Open \(game.title)")
@@ -70,6 +74,7 @@ struct MyGamesView: View {
 
 private struct OwnedGameTile: View {
     let game: Game
+    let isFollowing: Bool
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -100,7 +105,12 @@ private struct OwnedGameTile: View {
                 }
 
             VStack(alignment: .leading, spacing: 6) {
-                MetricPill(icon: "checkmark.circle.fill", text: "Owned")
+                HStack(spacing: 6) {
+                    MetricPill(icon: "checkmark.circle.fill", text: "Owned")
+                    if isFollowing {
+                        MetricPill(icon: "bell.fill", text: "Following")
+                    }
+                }
                 Spacer()
                 Text(game.title)
                     .font(.headline.weight(.bold))
@@ -122,6 +132,7 @@ private struct OwnedGameTile: View {
 
 private struct FavoritedGameRow: View {
     let game: Game
+    @EnvironmentObject private var store: AppStore
 
     var body: some View {
         HStack(spacing: 10) {
@@ -142,9 +153,45 @@ private struct FavoritedGameRow: View {
                     .foregroundStyle(.white.opacity(0.70))
             }
             Spacer()
+            FollowToggleButton(game: game)
+                .buttonStyle(.borderless)
             Image(systemName: "chevron.right")
                 .font(.caption.bold())
                 .foregroundStyle(.white.opacity(0.70))
         }
+    }
+}
+
+private struct FollowToggleButton: View {
+    @EnvironmentObject private var store: AppStore
+    let game: Game
+
+    private var isFollowing: Bool {
+        store.isFollowingGame(game)
+    }
+
+    var body: some View {
+        Button {
+            store.toggleFollowedGame(game)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isFollowing ? "bell.fill" : "bell")
+                Text(isFollowing ? "Following" : "Follow")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                (isFollowing ? AppTheme.accent.opacity(0.28) : Color.white.opacity(0.12)),
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .stroke(Color.white.opacity(isFollowing ? 0.45 : 0.25), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(isFollowing ? "Unfollow \(game.title)" : "Follow \(game.title)")
     }
 }

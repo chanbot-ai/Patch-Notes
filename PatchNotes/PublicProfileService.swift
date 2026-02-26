@@ -70,6 +70,19 @@ final class PublicProfileService {
         return try decodeProfiles(from: response.data)
     }
 
+    func fetchPublicProfiles(ids: [UUID]) async throws -> [PublicProfile] {
+        let uniqueIDs = Array(Set(ids))
+        guard !uniqueIDs.isEmpty else { return [] }
+
+        let response = try await client
+            .from("public_profiles")
+            .select()
+            .in("id", values: uniqueIDs.map(\.uuidString))
+            .execute()
+
+        return try decodeProfiles(from: response.data)
+    }
+
     private func decodeProfiles(from data: Data) throws -> [PublicProfile] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in

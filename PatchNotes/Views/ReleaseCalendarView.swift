@@ -384,6 +384,25 @@ private struct ReleaseCard: View {
                     Spacer()
 
                     Button {
+                        store.toggleFollowedGame(game)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: store.isFollowingGame(game) ? "dot.radiowaves.left.and.right" : "plus.circle")
+                            Text(store.isFollowingGame(game) ? "Following" : "Follow")
+                        }
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(
+                            store.isFollowingGame(game) ? AppTheme.accent.opacity(0.20) : Color.white.opacity(0.09),
+                            in: Capsule()
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(store.isFollowingGame(game) ? "Unfollow game" : "Follow game")
+
+                    Button {
                         store.toggleFavorite(game)
                     } label: {
                         HStack(spacing: 6) {
@@ -431,15 +450,36 @@ struct GameReleaseDetailView: View {
 
                             Spacer()
 
-                            Button {
-                                store.toggleFavorite(game)
-                            } label: {
-                                Image(systemName: store.isFavorite(game) ? "star.fill" : "star")
-                                    .font(.headline.bold())
-                                    .foregroundStyle(store.isFavorite(game) ? .yellow : .white.opacity(0.8))
+                            HStack(spacing: 10) {
+                                Button {
+                                    store.toggleFollowedGame(game)
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: store.isFollowingGame(game) ? "dot.radiowaves.left.and.right" : "plus.circle")
+                                        Text(store.isFollowingGame(game) ? "Following" : "Follow")
+                                    }
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.white.opacity(0.92))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        store.isFollowingGame(game) ? AppTheme.accent.opacity(0.22) : Color.white.opacity(0.10),
+                                        in: Capsule()
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(store.isFollowingGame(game) ? "Unfollow game" : "Follow game")
+
+                                Button {
+                                    store.toggleFavorite(game)
+                                } label: {
+                                    Image(systemName: store.isFavorite(game) ? "star.fill" : "star")
+                                        .font(.headline.bold())
+                                        .foregroundStyle(store.isFavorite(game) ? .yellow : .white.opacity(0.8))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(store.isFavorite(game) ? "Remove favorite" : "Favorite game")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(store.isFavorite(game) ? "Remove favorite" : "Favorite game")
                         }
 
                         HStack(spacing: 8) {

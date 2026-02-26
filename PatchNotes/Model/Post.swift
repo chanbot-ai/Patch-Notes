@@ -2,6 +2,8 @@ import Foundation
 
 struct Post: Identifiable, Decodable {
     let id: UUID
+    let author_id: UUID?
+    let game_id: UUID?
     let title: String?
     let body: String?
     let media_url: String?
@@ -11,6 +13,74 @@ struct Post: Identifiable, Decodable {
     let reaction_count: Int?
     let comment_count: Int?
     let hot_score: Double?
+    let author_username: String?
+    let author_display_name: String?
+    let author_avatar_url: String?
+    let author_created_at: Date?
+
+    var authorID: UUID? { author_id }
+    var gameID: UUID? { game_id }
+
+    var authorProfile: PublicProfile? {
+        guard let authorID,
+              let author_username,
+              let author_created_at else { return nil }
+        return PublicProfile(
+            id: authorID,
+            username: author_username,
+            display_name: author_display_name,
+            avatar_url: author_avatar_url,
+            created_at: author_created_at
+        )
+    }
+
+    enum ContentType: String {
+        case text
+        case image
+        case video
+        case link
+    }
+
+    var contentType: ContentType {
+        let normalized = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == ContentType.video.rawValue {
+            return .video
+        }
+        if normalized == ContentType.link.rawValue {
+            return .link
+        }
+        if normalized == ContentType.image.rawValue {
+            return .image
+        }
+        if let mediaURL, mediaURL.isTwitterStatusURL {
+            return .link
+        }
+        return mediaURL == nil ? .text : .image
+    }
+
+    var mediaURL: URL? {
+        guard let media_url,
+              !media_url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return URL(string: media_url)
+    }
+
+    var thumbnailURL: URL? {
+        guard let thumbnail_url,
+              !thumbnail_url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return URL(string: thumbnail_url)
+    }
+}
+
+private extension URL {
+    var isTwitterStatusURL: Bool {
+        guard let host = host?.lowercased() else { return false }
+        let isSupportedHost = host == "x.com"
+            || host.hasSuffix(".x.com")
+            || host == "twitter.com"
+            || host.hasSuffix(".twitter.com")
+        guard isSupportedHost else { return false }
+        return pathComponents.contains("status")
+    }
 }
 
 struct ReactionType: Identifiable, Decodable, Equatable {
@@ -29,4 +99,100 @@ struct PostReactionCount: Identifiable, Decodable, Equatable {
 
     var postID: UUID { post_id }
     var reactionTypeID: UUID { reaction_type_id }
+}
+
+struct Comment: Identifiable, Decodable, Equatable {
+    let id: UUID
+    let post_id: UUID
+    let user_id: UUID
+    let body: String
+    let parent_comment_id: UUID?
+    let created_at: Date
+    let reaction_count: Int?
+    let hot_score: Double?
+    let author_username: String?
+    let author_display_name: String?
+    let author_avatar_url: String?
+    let author_created_at: Date?
+
+    var postID: UUID { post_id }
+    var userID: UUID { user_id }
+    var parentCommentID: UUID? { parent_comment_id }
+
+    var authorProfile: PublicProfile? {
+        guard let author_username,
+              let author_created_at else { return nil }
+        return PublicProfile(
+            id: user_id,
+            username: author_username,
+            display_name: author_display_name,
+            avatar_url: author_avatar_url,
+            created_at: author_created_at
+        )
+    }
+}
+
+enum CommentSortMode: String, CaseIterable, Identifiable {
+    case top
+    case new
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .top: return "Top"
+        case .new: return "New"
+        }
+    }
+}
+
+struct CommentReactionCount: Identifiable, Decodable, Equatable {
+    let comment_id: UUID
+    let reaction_type_id: UUID
+    var count: Int
+
+    var id: UUID { reaction_type_id }
+
+    var commentID: UUID { comment_id }
+    var reactionTypeID: UUID { reaction_type_id }
+}
+
+struct AppNotification: Identifiable, Decodable, Equatable {
+    let id: UUID
+    let user_id: UUID
+    let actor_user_id: UUID
+    let post_id: UUID?
+    let comment_id: UUID?
+    let type: String
+    let created_at: Date
+    let read: Bool
+
+    var userID: UUID { user_id }
+    var actorUserID: UUID { actor_user_id }
+    var postID: UUID? { post_id }
+    var commentID: UUID? { comment_id }
+    var createdAt: Date { created_at }
+    var isRead: Bool { read }
+
+    var titleText: String {
+        switch type {
+        case "comment_reply":
+            return "New reply"
+        case "post_comment":
+            return "New comment"
+        default:
+            return "New activity"
+        }
+    }
+
+    var bodyText: String {
+        switch type {
+        case "comment_reply":
+            return "Someone replied to your comment."
+        case "post_comment":
+            return "Someone commented on your post."
+        default:
+            return "There’s new activity on your feed."
+        }
+    }
 }
