@@ -23,6 +23,7 @@ final class FeedBadgeSystemTests: XCTestCase {
     func testLabelLookupMatchesApprovedCompactLabels() {
         XCTAssertEqual(FeedBadgeLabels.labels(for: .generalGaming).compact, "GEN")
         XCTAssertEqual(FeedBadgeLabels.labels(for: .multiGame).compact, "MULTI")
+        XCTAssertEqual(FeedBadgeLabels.labels(for: .unspecified).compact, "GEN")
     }
 
     func testContentRegistryReturnsIconOnlyAccessibilityLabel() {

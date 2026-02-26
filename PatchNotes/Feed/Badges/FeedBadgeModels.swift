@@ -209,7 +209,8 @@ enum FeedBadgeLabels {
         case .generalGaming:
             return .init(compact: "GEN", full: "Gaming", detail: "General Gaming")
         case .unspecified:
-            return .init(compact: "UNSP", full: "Unspec", detail: "Unspecified")
+            // UI groups unspecified under the General Gaming badge presentation.
+            return .init(compact: "GEN", full: "Gaming", detail: "General Gaming")
         }
     }
 
@@ -230,7 +231,7 @@ enum FeedBadgeLabels {
         case .generalGaming:
             return "gamecontroller"
         case .unspecified:
-            return "questionmark.circle.fill"
+            return "gamecontroller"
         }
     }
 
@@ -243,7 +244,7 @@ enum FeedBadgeLabels {
         case .platform: return "cyan"
         case .event: return "orange"
         case .generalGaming: return "blue"
-        case .unspecified: return "neutral"
+        case .unspecified: return "blue"
         }
     }
 
@@ -256,7 +257,7 @@ enum FeedBadgeLabels {
         case .platform: return "chip-pill"
         case .event: return "ticket-pill"
         case .generalGaming: return "soft-pill"
-        case .unspecified: return "neutral-pill"
+        case .unspecified: return "soft-pill"
         }
     }
 }
