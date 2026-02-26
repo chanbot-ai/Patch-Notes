@@ -199,6 +199,7 @@ struct EsportsMatch: Identifiable, Hashable {
     let detailLine: String
     let subDetail: String
     let isFeatured: Bool
+    let seriesFormat: Int?  // nil = single map, 3 = Bo3, 5 = Bo5
     let scheduledAt: Date?
     let streamURL: URL?
 
@@ -215,6 +216,7 @@ struct EsportsMatch: Identifiable, Hashable {
         detailLine: String,
         subDetail: String,
         isFeatured: Bool,
+        seriesFormat: Int? = nil,
         scheduledAt: Date? = nil,
         streamURL: URL? = nil
     ) {
@@ -230,8 +232,23 @@ struct EsportsMatch: Identifiable, Hashable {
         self.detailLine = detailLine
         self.subDetail = subDetail
         self.isFeatured = isFeatured
+        self.seriesFormat = seriesFormat
         self.scheduledAt = scheduledAt
         self.streamURL = streamURL
+    }
+}
+
+struct LeagueStanding: Identifiable, Hashable {
+    let id: UUID
+    let rank: Int
+    let teamName: String
+    let wins: Int
+    let losses: Int
+
+    var record: String { "\(wins)-\(losses)" }
+    var winRate: Double {
+        let total = wins + losses
+        return total > 0 ? Double(wins) / Double(total) : 0.5
     }
 }
 

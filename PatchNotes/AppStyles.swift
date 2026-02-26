@@ -610,32 +610,32 @@ struct TeamLogoBadge: View {
     var size: CGFloat = 20
 
     private static let logoURLs: [String: URL] = [
-        "Sentinels":     URL(string: "https://ui-avatars.com/api/?name=Sentinels&background=d4333f&color=fff&size=128&rounded=true&bold=true")!,
-        "Paper Rex":     URL(string: "https://ui-avatars.com/api/?name=Paper+Rex&background=1aa4f2&color=fff&size=128&rounded=true&bold=true")!,
-        "T1":            URL(string: "https://ui-avatars.com/api/?name=T1&background=f22626&color=fff&size=128&rounded=true&bold=true")!,
-        "G2":            URL(string: "https://ui-avatars.com/api/?name=G2&background=f22626&color=fff&size=128&rounded=true&bold=true")!,
-        "Gen.G":         URL(string: "https://ui-avatars.com/api/?name=Gen.G&background=3d8cf5&color=fff&size=128&rounded=true&bold=true")!,
-        "Liquid":        URL(string: "https://ui-avatars.com/api/?name=Liquid&background=3d8cf5&color=fff&size=128&rounded=true&bold=true")!,
-        "FaZe":          URL(string: "https://ui-avatars.com/api/?name=FaZe&background=fa9124&color=fff&size=128&rounded=true&bold=true")!,
-        "Fnatic":        URL(string: "https://ui-avatars.com/api/?name=Fnatic&background=fa9124&color=fff&size=128&rounded=true&bold=true")!,
-        "NRG":           URL(string: "https://ui-avatars.com/api/?name=NRG&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "100 Thieves":   URL(string: "https://ui-avatars.com/api/?name=100+Thieves&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "Loud":          URL(string: "https://ui-avatars.com/api/?name=Loud&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "Evil Geniuses": URL(string: "https://ui-avatars.com/api/?name=Evil+Geniuses&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "Cloud9":        URL(string: "https://ui-avatars.com/api/?name=Cloud9&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "TSM":           URL(string: "https://ui-avatars.com/api/?name=TSM&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "DRX":           URL(string: "https://ui-avatars.com/api/?name=DRX&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "KT Rolster":    URL(string: "https://ui-avatars.com/api/?name=KT+Rolster&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "Team Spirit":   URL(string: "https://ui-avatars.com/api/?name=Team+Spirit&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "MOUZ":          URL(string: "https://ui-avatars.com/api/?name=MOUZ&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "Heroic":        URL(string: "https://ui-avatars.com/api/?name=Heroic&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "Virtus.pro":    URL(string: "https://ui-avatars.com/api/?name=Virtus.pro&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "Vitality":      URL(string: "https://ui-avatars.com/api/?name=Vitality&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "Spirit":        URL(string: "https://ui-avatars.com/api/?name=Spirit&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "BetBoom":       URL(string: "https://ui-avatars.com/api/?name=BetBoom&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "Falcons":       URL(string: "https://ui-avatars.com/api/?name=Falcons&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "Team Secret":   URL(string: "https://ui-avatars.com/api/?name=Team+Secret&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
-        "OG":            URL(string: "https://ui-avatars.com/api/?name=OG&background=5c3bc9&color=fff&size=128&rounded=true&bold=true")!,
+        "Sentinels":     URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2e/Sentinels_logo.svg/200px-Sentinels_logo.svg.png")!,
+        "Paper Rex":     URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Paper_Rex_logo.svg/200px-Paper_Rex_logo.svg.png")!,
+        "T1":            URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/T1_esports_logo.svg/200px-T1_esports_logo.svg.png")!,
+        "G2":            URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/1/12/Esports_organization_G2_Esports_logo.svg/200px-Esports_organization_G2_Esports_logo.svg.png")!,
+        "Gen.G":         URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/77/Gen.G_Logo.svg/200px-Gen.G_Logo.svg.png")!,
+        "Liquid":        URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f1/Team_Liquid_logo.svg/200px-Team_Liquid_logo.svg.png")!,
+        "FaZe":          URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Faze_Clan.svg/200px-Faze_Clan.svg.png")!,
+        "Fnatic":        URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/4/43/Esports_organization_Fnatic_logo.svg/200px-Esports_organization_Fnatic_logo.svg.png")!,
+        "NRG":           URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/NRG_Esports_logo.svg/200px-NRG_Esports_logo.svg.png")!,
+        "100 Thieves":   URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/16/100_Thieves_logo.svg/200px-100_Thieves_logo.svg.png")!,
+        "Loud":          URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9f/LOUD_logo.svg/200px-LOUD_logo.svg.png")!,
+        "Evil Geniuses": URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/54/Evil_Geniuses_Logo.svg/200px-Evil_Geniuses_Logo.svg.png")!,
+        "Cloud9":        URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f7/Cloud9_logo_c._2023.svg/200px-Cloud9_logo_c._2023.svg.png")!,
+        "TSM":           URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c7/TSM_Logo.svg/200px-TSM_Logo.svg.png")!,
+        "DRX":           URL(string: "https://upload.wikimedia.org/wikipedia/commons/3/34/DRX_logo_2023.png")!,
+        "KT Rolster":    URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f6/KT_Logo.svg/200px-KT_Logo.svg.png")!,
+        "Team Spirit":   URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Team_Spirit_new_em.svg/200px-Team_Spirit_new_em.svg.png")!,
+        "Spirit":        URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Team_Spirit_new_em.svg/200px-Team_Spirit_new_em.svg.png")!,
+        "MOUZ":          URL(string: "https://upload.wikimedia.org/wikipedia/commons/3/39/MOUZlogo2021.png")!,
+        "Heroic":        URL(string: "https://upload.wikimedia.org/wikipedia/commons/8/8f/Heroic_2023_logo.png")!,
+        "Virtus.pro":    URL(string: "https://upload.wikimedia.org/wikipedia/en/3/3b/Virtus_pro_logo_new.png")!,
+        "Vitality":      URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/4/49/Team_Vitality_logo.svg/200px-Team_Vitality_logo.svg.png")!,
+        "BetBoom":       URL(string: "https://upload.wikimedia.org/wikipedia/commons/2/24/BetBoom_Team.png")!,
+        "Falcons":       URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/4/4d/Team_Falcons_Logo.svg/200px-Team_Falcons_Logo.svg.png")!,
+        "Team Secret":   URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/2/2a/Team_Secret_logo.svg/200px-Team_Secret_logo.svg.png")!,
+        "OG":            URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/5/5c/OG_Esports_logo.svg/200px-OG_Esports_logo.svg.png")!,
     ]
 
     private var logoURL: URL? { Self.logoURLs[team] }
@@ -684,9 +684,9 @@ struct TeamLogoBadge: View {
                 case .success(let image):
                     image
                         .resizable()
-                        .scaledToFill()
-                        .frame(width: size, height: size)
-                        .clipShape(Circle())
+                        .scaledToFit()
+                        .padding(size * 0.10)
+                        .background(Color.white.opacity(0.10), in: Circle())
                         .overlay {
                             Circle().stroke(Color.white.opacity(0.24), lineWidth: 1)
                         }
@@ -696,6 +696,7 @@ struct TeamLogoBadge: View {
                     gradientBadge
                 }
             }
+            .frame(width: size, height: size)
         } else {
             gradientBadge
         }

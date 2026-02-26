@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 struct MatchDetailView: View {
     let match: EsportsMatch
@@ -95,6 +96,10 @@ private struct MatchHeaderSection: View {
                         .padding(.vertical, 10)
                         .background(.red.opacity(0.85), in: Capsule())
                 }
+            }
+
+            if match.state == .upcoming, match.scheduledAt != nil {
+                MatchRemindMeButton(match: match)
             }
         }
         .padding(20)
@@ -333,6 +338,93 @@ private struct OutcomeRow: View {
         case .up:   return .green
         case .down: return .red
         case .flat: return .gray
+        }
+    }
+}
+
+// MARK: - Feature 7: Remind Me Button
+
+private struct MatchRemindMeButton: View {
+    let match: EsportsMatch
+
+    @State private var reminderSet = false
+    @State private var showPermissionAlert = false
+
+    var body: some View {
+        Button {
+            scheduleReminder()
+        } label: {
+            Label(
+                reminderSet ? "Reminder Set" : "Remind Me · 5 min before",
+                systemImage: reminderSet ? "bell.fill" : "bell"
+            )
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(reminderSet ? .yellow : .white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                reminderSet ? Color.yellow.opacity(0.18) : Color.white.opacity(0.12),
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .stroke(reminderSet ? Color.yellow.opacity(0.40) : Color.white.opacity(0.20), lineWidth: 1)
+            }
+        }
+        .disabled(reminderSet)
+        .alert("Notifications Disabled", isPresented: $showPermissionAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enable notifications in Settings to receive match reminders.")
+        }
+    }
+
+    private func scheduleReminder() {
+        guard let scheduledAt = match.scheduledAt else { return }
+        let fireDate = scheduledAt.addingTimeInterval(-5 * 60)
+        guard fireDate > Date() else { return }
+
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                switch settings.authorizationStatus {
+                case .denied:
+                    showPermissionAlert = true
+                case .notDetermined:
+                    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                        if granted { addNotification(fireDate: fireDate) }
+                    }
+                default:
+                    addNotification(fireDate: fireDate)
+                }
+            }
+        }
+    }
+
+    private func addNotification(fireDate: Date) {
+        let content = UNMutableNotificationContent()
+        content.title = "\(match.awayTeam) vs \(match.homeTeam)"
+        content.body = "Match starts in 5 minutes · \(match.league)"
+        content.sound = .default
+
+        let components = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second],
+            from: fireDate
+        )
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        let request = UNNotificationRequest(
+            identifier: "match-\(match.id.uuidString)",
+            content: content,
+            trigger: trigger
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if error == nil {
+                DispatchQueue.main.async { reminderSet = true }
+            }
         }
     }
 }

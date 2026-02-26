@@ -29,6 +29,9 @@ final class AppStore: ObservableObject {
     @Published private(set) var shortVideos: [ShortVideo]
     @Published private(set) var esportsMatches: [EsportsMatch]
     @Published private(set) var esportsMarkets: [EsportsMarket]
+    @Published private(set) var leagueStandings: [String: [LeagueStanding]]
+    @Published private(set) var favoriteTeams: Set<String>
+    @Published private(set) var isLoadingEsports: Bool
 
     private var threadsByGame: [Game.ID: [ThreadPost]]
     private let calendar = Calendar.current
@@ -58,6 +61,10 @@ final class AppStore: ObservableObject {
         self.shortVideos = []
         self.esportsMatches = []
         self.esportsMarkets = []
+        self.leagueStandings = [:]
+        let storedFavorites = UserDefaults.standard.stringArray(forKey: "pn.esports.favoriteTeams") ?? []
+        self.favoriteTeams = Set(storedFavorites)
+        self.isLoadingEsports = false
         self.threadsByGame = [:]
         refresh(referenceDate: referenceDate)
         configureFeedOwnership()
@@ -87,6 +94,19 @@ final class AppStore: ObservableObject {
 
     func isFavorite(_ game: Game) -> Bool {
         favoriteReleaseIDs.contains(game.id)
+    }
+
+    func toggleFavoriteTeam(_ team: String) {
+        if favoriteTeams.contains(team) {
+            favoriteTeams.remove(team)
+        } else {
+            favoriteTeams.insert(team)
+        }
+        UserDefaults.standard.set(Array(favoriteTeams), forKey: "pn.esports.favoriteTeams")
+    }
+
+    func isFavoriteTeam(_ team: String) -> Bool {
+        favoriteTeams.contains(team)
     }
 
     func releases(forMonthContaining date: Date) -> [Game] {
@@ -132,6 +152,7 @@ final class AppStore: ObservableObject {
         shortVideos = seed.shortVideos
         esportsMatches = seed.esportsMatches
         esportsMarkets = seed.esportsMarkets
+        leagueStandings = seed.leagueStandings
         threadsByGame = seed.threadsByGame
 
         let defaultFavorites = Set(seed.defaultFavoriteIDs)
@@ -183,7 +204,10 @@ final class AppStore: ObservableObject {
     }
 
     func refreshEsports() async {
+        isLoadingEsports = true
+        try? await Task.sleep(for: .milliseconds(700))
         refresh()
+        isLoadingEsports = false
     }
 
     func refreshHotFeed() async {
@@ -531,6 +555,7 @@ struct AppSeedData {
     let shortVideos: [ShortVideo]
     let esportsMatches: [EsportsMatch]
     let esportsMarkets: [EsportsMarket]
+    let leagueStandings: [String: [LeagueStanding]]
     let threadsByGame: [Game.ID: [ThreadPost]]
 
     init(referenceDate: Date) {
@@ -878,27 +903,27 @@ struct AppSeedData {
 
         esportsMatches = [
             // Live
-            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "Sentinels", awayTeam: "Paper Rex", homeRecord: "12-4", awayRecord: "11-5", homeScore: 2, awayScore: 1, state: .live, detailLine: "LIVE · MAP 4", subDetail: "Ascent · 7m", isFeatured: true, streamURL: URL(string: "https://www.twitch.tv/valorant_esports")),
-            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "T1", awayTeam: "Gen.G", homeRecord: "10-2", awayRecord: "11-1", homeScore: 1, awayScore: 1, state: .live, detailLine: "LIVE · GAME 3", subDetail: "Baron in 1m", isFeatured: false, streamURL: URL(string: "https://www.twitch.tv/lck")),
+            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "Sentinels", awayTeam: "Paper Rex", homeRecord: "12-4", awayRecord: "11-5", homeScore: 2, awayScore: 1, state: .live, detailLine: "LIVE · MAP 4", subDetail: "Ascent · 7m", isFeatured: true, seriesFormat: 5, streamURL: URL(string: "https://www.twitch.tv/valorant_esports")),
+            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "T1", awayTeam: "Gen.G", homeRecord: "10-2", awayRecord: "11-1", homeScore: 1, awayScore: 1, state: .live, detailLine: "LIVE · GAME 3", subDetail: "Baron in 1m", isFeatured: false, seriesFormat: 5, streamURL: URL(string: "https://www.twitch.tv/lck")),
             // Final
             EsportsMatch(id: UUID(), league: "CS2", homeTeam: "G2", awayTeam: "FaZe", homeRecord: "9-3", awayRecord: "8-4", homeScore: 16, awayScore: 13, state: .final, detailLine: "FINAL", subDetail: "Inferno", isFeatured: false),
-            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "G2", awayTeam: "Fnatic", homeRecord: "8-4", awayRecord: "8-4", homeScore: 2, awayScore: 0, state: .final, detailLine: "FINAL", subDetail: "Best of 3", isFeatured: false),
-            EsportsMatch(id: UUID(), league: "Dota 2", homeTeam: "Spirit", awayTeam: "BetBoom", homeRecord: "6-3", awayRecord: "6-3", homeScore: 1, awayScore: 2, state: .final, detailLine: "FINAL", subDetail: "Best of 3", isFeatured: false),
+            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "G2", awayTeam: "Fnatic", homeRecord: "8-4", awayRecord: "8-4", homeScore: 2, awayScore: 0, state: .final, detailLine: "FINAL", subDetail: "Best of 3", isFeatured: false, seriesFormat: 3),
+            EsportsMatch(id: UUID(), league: "Dota 2", homeTeam: "Spirit", awayTeam: "BetBoom", homeRecord: "6-3", awayRecord: "6-3", homeScore: 1, awayScore: 2, state: .final, detailLine: "FINAL", subDetail: "Best of 3", isFeatured: false, seriesFormat: 3),
             // Today – upcoming
-            EsportsMatch(id: UUID(), league: "CS2", homeTeam: "Team Spirit", awayTeam: "MOUZ", homeRecord: "7-5", awayRecord: "7-5", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Stage Match", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 0, hour: 10)),
-            EsportsMatch(id: UUID(), league: "Dota 2", homeTeam: "Falcons", awayTeam: "Liquid", homeRecord: "6-3", awayRecord: "5-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Group Stage", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 0, hour: 13, minute: 30)),
-            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "NRG", awayTeam: "100 Thieves", homeRecord: "9-3", awayRecord: "8-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Playoffs", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 0, hour: 17)),
+            EsportsMatch(id: UUID(), league: "CS2", homeTeam: "Team Spirit", awayTeam: "MOUZ", homeRecord: "7-5", awayRecord: "7-5", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Stage Match", isFeatured: false, seriesFormat: 3, scheduledAt: scheduleTime(daysFromNow: 0, hour: 10)),
+            EsportsMatch(id: UUID(), league: "Dota 2", homeTeam: "Falcons", awayTeam: "Liquid", homeRecord: "6-3", awayRecord: "5-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Group Stage", isFeatured: false, seriesFormat: 3, scheduledAt: scheduleTime(daysFromNow: 0, hour: 13, minute: 30)),
+            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "NRG", awayTeam: "100 Thieves", homeRecord: "9-3", awayRecord: "8-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Playoffs", isFeatured: false, seriesFormat: 3, scheduledAt: scheduleTime(daysFromNow: 0, hour: 17)),
             EsportsMatch(id: UUID(), league: "LoL", homeTeam: "Cloud9", awayTeam: "TSM", homeRecord: "7-5", awayRecord: "5-7", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO1", subDetail: "LCS Regular Season", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 0, hour: 20)),
             // Tomorrow – upcoming
-            EsportsMatch(id: UUID(), league: "CS2", homeTeam: "Heroic", awayTeam: "Virtus.pro", homeRecord: "8-4", awayRecord: "7-5", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Group Stage", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 1, hour: 10)),
-            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "Loud", awayTeam: "Evil Geniuses", homeRecord: "10-2", awayRecord: "7-5", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Playoffs Quarterfinal", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 1, hour: 14)),
-            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "DRX", awayTeam: "KT Rolster", homeRecord: "9-3", awayRecord: "8-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO5", subDetail: "LCK Semifinals", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 1, hour: 18)),
+            EsportsMatch(id: UUID(), league: "CS2", homeTeam: "Heroic", awayTeam: "Virtus.pro", homeRecord: "8-4", awayRecord: "7-5", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Group Stage", isFeatured: false, seriesFormat: 3, scheduledAt: scheduleTime(daysFromNow: 1, hour: 10)),
+            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "Loud", awayTeam: "Evil Geniuses", homeRecord: "10-2", awayRecord: "7-5", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Playoffs Quarterfinal", isFeatured: false, seriesFormat: 3, scheduledAt: scheduleTime(daysFromNow: 1, hour: 14)),
+            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "DRX", awayTeam: "KT Rolster", homeRecord: "9-3", awayRecord: "8-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO5", subDetail: "LCK Semifinals", isFeatured: false, seriesFormat: 5, scheduledAt: scheduleTime(daysFromNow: 1, hour: 18)),
             // Day +2 – upcoming
-            EsportsMatch(id: UUID(), league: "Dota 2", homeTeam: "Team Secret", awayTeam: "OG", homeRecord: "5-4", awayRecord: "5-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Group Stage", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 2, hour: 11)),
-            EsportsMatch(id: UUID(), league: "CS2", homeTeam: "FaZe", awayTeam: "Vitality", homeRecord: "8-4", awayRecord: "9-3", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Playoffs Semifinal", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 2, hour: 15)),
-            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "Paper Rex", awayTeam: "Loud", homeRecord: "11-5", awayRecord: "10-2", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO5", subDetail: "Grand Final", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 2, hour: 19)),
+            EsportsMatch(id: UUID(), league: "Dota 2", homeTeam: "Team Secret", awayTeam: "OG", homeRecord: "5-4", awayRecord: "5-4", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Group Stage", isFeatured: false, seriesFormat: 3, scheduledAt: scheduleTime(daysFromNow: 2, hour: 11)),
+            EsportsMatch(id: UUID(), league: "CS2", homeTeam: "FaZe", awayTeam: "Vitality", homeRecord: "8-4", awayRecord: "9-3", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO3", subDetail: "Playoffs Semifinal", isFeatured: false, seriesFormat: 3, scheduledAt: scheduleTime(daysFromNow: 2, hour: 15)),
+            EsportsMatch(id: UUID(), league: "VCT", homeTeam: "Paper Rex", awayTeam: "Loud", homeRecord: "11-5", awayRecord: "10-2", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO5", subDetail: "Grand Final", isFeatured: false, seriesFormat: 5, scheduledAt: scheduleTime(daysFromNow: 2, hour: 19)),
             // Day +3 – upcoming
-            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "T1", awayTeam: "DRX", homeRecord: "10-2", awayRecord: "9-3", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO5", subDetail: "LCK Grand Final", isFeatured: false, scheduledAt: scheduleTime(daysFromNow: 3, hour: 16)),
+            EsportsMatch(id: UUID(), league: "LoL", homeTeam: "T1", awayTeam: "DRX", homeRecord: "10-2", awayRecord: "9-3", homeScore: 0, awayScore: 0, state: .upcoming, detailLine: "BO5", subDetail: "LCK Grand Final", isFeatured: false, seriesFormat: 5, scheduledAt: scheduleTime(daysFromNow: 3, hour: 16)),
         ]
 
         esportsMarkets = [
@@ -1037,5 +1062,49 @@ struct AppSeedData {
         }
 
         threadsByGame = threadMap
+
+        func makeStandings(_ data: [(String, Int, Int)]) -> [LeagueStanding] {
+            data.enumerated().map { i, entry in
+                LeagueStanding(id: UUID(), rank: i + 1, teamName: entry.0, wins: entry.1, losses: entry.2)
+            }
+        }
+
+        leagueStandings = [
+            "VCT": makeStandings([
+                ("Loud",          10, 2),
+                ("NRG",            9, 3),
+                ("Sentinels",     12, 4),
+                ("Paper Rex",     11, 5),
+                ("100 Thieves",    8, 4),
+                ("Evil Geniuses",  7, 5),
+            ]),
+            "LoL": makeStandings([
+                ("Gen.G",      11, 1),
+                ("T1",         10, 2),
+                ("DRX",         9, 3),
+                ("G2",          8, 4),
+                ("KT Rolster",  8, 4),
+                ("Fnatic",      8, 4),
+                ("Cloud9",      7, 5),
+                ("TSM",         5, 7),
+            ]),
+            "CS2": makeStandings([
+                ("G2",           9, 3),
+                ("Vitality",     9, 3),
+                ("FaZe",         8, 4),
+                ("Heroic",       8, 4),
+                ("Team Spirit",  7, 5),
+                ("MOUZ",         7, 5),
+                ("Virtus.pro",   7, 5),
+            ]),
+            "Dota 2": makeStandings([
+                ("Spirit",       6, 3),
+                ("BetBoom",      6, 3),
+                ("Falcons",      6, 3),
+                ("Liquid",       5, 4),
+                ("Team Secret",  5, 4),
+                ("OG",           5, 4),
+            ]),
+        ]
     }
 }
