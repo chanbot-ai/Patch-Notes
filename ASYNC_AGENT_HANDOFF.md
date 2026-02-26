@@ -6,19 +6,20 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: My Games now surfaces followed titles powering Following feed
+- Last milestone: Release Calendar "Games This Month" spotlight polish (Batch 10)
 
 ## Latest Milestone
 
 ### Summary
 
-- Added a new `Following Feed Sources` section at the top of `MyGamesView` that lists the user’s followed games (the exact titles that drive the social Following feed).
-- Reused existing follow-toggle row UI for quick management, added loading/error/retry states, and auto-triggered followed-game refresh on view appearance when needed.
-- Added a small fallback note when some followed game IDs are not yet present in the local game catalog, so the UI explains missing rows instead of silently hiding them.
+- Added a richer `Games This Month` spotlight board above the calendar grid in `ReleaseCalendarView`, with horizontal cover-art cards for upcoming releases in the selected month.
+- Prioritized spotlight card ordering by followed/favorited titles first, then release date, so the top strip reflects the user’s current interests.
+- Added compact per-card metadata and quick actions (`Details`, follow toggle, favorite toggle) plus a lightweight social-post count signal using cached hot/following feed posts.
+- Kept the existing text agenda below the grid (renamed to `Month Agenda`) so the new visual strip complements rather than replaces the dense list.
 
 ### Files Touched
 
-- `PatchNotes/Views/MyGamesView.swift`
+- `PatchNotes/Views/ReleaseCalendarView.swift`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
@@ -27,12 +28,14 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 ### Verification
 
-- `HOME=/tmp/codex-home-async xcodebuild -scheme PatchNotes -destination 'generic/platform=iOS' -configuration Debug build` failed in sandbox (CoreSimulator service unavailable and denied writes to `~/.cache/clang/ModuleCache` / SwiftPM manifest cache under `~/Library/Caches`), so package resolution did not complete and no app-level compile diagnostics were emitted.
+- `HOME=/tmp/codex-home-async CLANG_MODULE_CACHE_PATH=/tmp/codex-clang-module-cache SWIFTPM_MODULECACHE_OVERRIDE=/tmp/codex-swiftpm-cache xcodebuild -scheme PatchNotes -destination 'generic/platform=iOS' -configuration Debug -derivedDataPath /tmp/codex-derived-data build` failed in sandbox:
+  - CoreSimulator service connection unavailable (expected sandbox limitation)
+  - SwiftPM dependency resolution failed because `github.com` DNS/network access is blocked in this environment (`Could not resolve host: github.com`)
 
 ### Open Risks / Notes
 
-- Followed games can exist server-side without a corresponding local `Game` model in the current seed/catalog; this milestone now exposes that mismatch with a count, but a fuller fix would fetch followed-game details directly (or hydrate catalog from a dedicated query) so every followed ID can render in `My Games`.
+- New spotlight cards use currently cached `hot` + `following` posts to show a lightweight social-post count; this is intentionally opportunistic and may show `0` until feed data has loaded in-session.
 
 ## Next Recommended Action
 
-- In a full Xcode environment, validate the new `My Games` followed section refresh/retry flow and confirm follow/unfollow actions immediately update both this section and the social Following feed.
+- In a full Xcode environment, validate the new Release Calendar spotlight strip on iPhone sizes (tap targets + horizontal scrolling) and confirm follow/favorite toggles update the spotlight ordering as expected.

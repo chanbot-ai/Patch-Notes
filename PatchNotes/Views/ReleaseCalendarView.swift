@@ -20,6 +20,22 @@ struct ReleaseCalendarView: View {
         store.releases(forMonthContaining: selectedMonth)
     }
 
+    private var monthHighlights: [Game] {
+        releasesForMonth
+            .sorted { lhs, rhs in
+                let lhsFollowing = store.isFollowingGame(lhs)
+                let rhsFollowing = store.isFollowingGame(rhs)
+                if lhsFollowing != rhsFollowing { return lhsFollowing && !rhsFollowing }
+
+                let lhsFavorite = store.isFavorite(lhs)
+                let rhsFavorite = store.isFavorite(rhs)
+                if lhsFavorite != rhsFavorite { return lhsFavorite && !rhsFavorite }
+
+                if lhs.releaseDate != rhs.releaseDate { return lhs.releaseDate < rhs.releaseDate }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+    }
+
     private var weekdaySymbols: [String] {
         let symbols = calendar.veryShortStandaloneWeekdaySymbols
         let shift = max(0, calendar.firstWeekday - 1)
@@ -63,6 +79,7 @@ struct ReleaseCalendarView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 monthPager
+                monthHighlightsBoard
                 monthCalendar
                 monthReleaseList
 
@@ -206,10 +223,65 @@ struct ReleaseCalendarView: View {
         }
     }
 
+    private var monthHighlightsBoard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Games This Month")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(.white)
+                        Text(highlightSubtitleText)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.68))
+                    }
+
+                    Spacer()
+
+                    if !releasesForMonth.isEmpty {
+                        Text("\(releasesForMonth.count)")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(.white.opacity(0.95))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(Color.white.opacity(0.10), in: Capsule())
+                            .accessibilityLabel("\(releasesForMonth.count) releases this month")
+                    }
+                }
+
+                if monthHighlights.isEmpty {
+                    Text("No launches in this month. Jump ahead or back to scout the next release wave.")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.72))
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(monthHighlights.prefix(8)) { game in
+                                MonthReleaseSpotlightCard(
+                                    game: game,
+                                    isFollowing: store.isFollowingGame(game),
+                                    isFavorite: store.isFavorite(game),
+                                    socialPostCount: socialPostCount(for: game)
+                                )
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    if monthHighlights.count > 8 {
+                        Text("Showing top 8 releases first (followed/favorited titles prioritized).")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.56))
+                    }
+                }
+            }
+        }
+    }
+
     private var monthReleaseList: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Month Releases")
+                Text("Month Agenda")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
 
@@ -260,6 +332,30 @@ struct ReleaseCalendarView: View {
     private func jumpToToday() {
         monthOffset = 0
         selectedDay = Date()
+    }
+
+    private var highlightSubtitleText: String {
+        guard !releasesForMonth.isEmpty else {
+            return "No scheduled launches in this window."
+        }
+
+        let followedCount = releasesForMonth.filter { store.isFollowingGame($0) }.count
+        let favoriteCount = releasesForMonth.filter { store.isFavorite($0) }.count
+        if followedCount > 0 || favoriteCount > 0 {
+            return "\(followedCount) followed · \(favoriteCount) favorited"
+        }
+        return "Tap a card to open details or follow for the social feed."
+    }
+
+    private func socialPostCount(for game: Game) -> Int {
+        var seen = Set<UUID>()
+        for post in store.posts where post.gameID == game.id {
+            seen.insert(post.id)
+        }
+        for post in store.followingPosts where post.gameID == game.id {
+            seen.insert(post.id)
+        }
+        return seen.count
     }
 }
 
@@ -420,6 +516,135 @@ private struct ReleaseCard: View {
                 }
             }
         }
+    }
+}
+
+private struct MonthReleaseSpotlightCard: View {
+    @EnvironmentObject private var store: AppStore
+
+    let game: Game
+    let isFollowing: Bool
+    let isFavorite: Bool
+    let socialPostCount: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack(alignment: .topLeading) {
+                RemoteMediaImage(primaryURL: game.coverImageURL, fallbackURL: MediaFallback.gameCover)
+                    .frame(width: 176, height: 100)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        LinearGradient(
+                            colors: [Color.clear, Color.black.opacity(0.45)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    }
+
+                HStack(spacing: 6) {
+                    if isFollowing {
+                        Label("Following", systemImage: "dot.radiowaves.left.and.right")
+                    }
+                    if isFavorite {
+                        Label("Starred", systemImage: "star.fill")
+                    }
+                }
+                .font(.caption2.weight(.bold))
+                .labelStyle(.iconOnly)
+                .foregroundStyle(.white.opacity(0.96))
+                .padding(7)
+                .background(Color.black.opacity(0.28), in: Capsule())
+                .padding(8)
+                .opacity((isFollowing || isFavorite) ? 1 : 0)
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(game.releaseDate.formatted(.dateTime.month(.abbreviated).day()))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.accentBlue)
+                Text(game.title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Text(spotlightMetaText)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.66))
+                    .lineLimit(2)
+            }
+
+            HStack(spacing: 8) {
+                NavigationLink {
+                    GameReleaseDetailView(game: game)
+                } label: {
+                    HStack(spacing: 5) {
+                        Text("Details")
+                        Image(systemName: "arrow.right.circle.fill")
+                    }
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.07), in: Capsule())
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    store.toggleFollowedGame(game)
+                } label: {
+                    Image(systemName: isFollowing ? "checkmark.circle.fill" : "plus.circle")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .frame(width: 28, height: 28)
+                        .background(isFollowing ? AppTheme.accent.opacity(0.24) : Color.white.opacity(0.09), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isFollowing ? "Unfollow game" : "Follow game")
+
+                Button {
+                    store.toggleFavorite(game)
+                } label: {
+                    Image(systemName: isFavorite ? "star.fill" : "star")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(isFavorite ? .yellow : .white.opacity(0.9))
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.09), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isFavorite ? "Remove favorite" : "Favorite game")
+
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(width: 176, alignment: .leading)
+        .padding(10)
+        .background(
+            LinearGradient(
+                colors: [Color.white.opacity(0.06), Color.white.opacity(0.03)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(game.title), releases \(game.releaseDate.formatted(date: .abbreviated, time: .omitted)). \(isFollowing ? "Following." : "") \(socialPostCount > 0 ? "\(socialPostCount) social posts." : "No social posts yet.")")
+    }
+
+    private var spotlightMetaText: String {
+        var parts = ["\(game.publisher)", game.genre]
+        if socialPostCount > 0 {
+            parts.append("\(socialPostCount) post\(socialPostCount == 1 ? "" : "s")")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 
