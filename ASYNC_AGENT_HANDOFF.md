@@ -6,41 +6,39 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Batch 6 hybrid feed architecture plan (extend `posts` path)
+- Last milestone: Batch 11 Home feed visual polish parity pass
 
 ## Latest Milestone
 
 ### Summary
 
-- Completed Batch 6 (planning) by auditing the current feed architecture (`posts` + `post_metrics` + `hot/following_feed_view` + `Post`/`AppStore` client flow) and documenting a low-churn hybrid-feed strategy.
-- Chose to extend `public.posts` with source metadata and project external cached items (for example `tweets_cache`) into `posts` rather than introducing a separate `feed_posts` table.
-- Added `HYBRID_FEED_ARCHITECTURE_PLAN.md` with phased Batch 7/8 implementation sequencing, dedupe strategy, risks, and migration/view/client touchpoints.
-- Marked Batch 6 done in the async backlog.
+- Polished the WIP `HomeView` visual hierarchy to better match the sleeker social/feed surfaces without changing behavior.
+- Added a compact `Daily Pulse Board` summary card (news/clips/following counts + unread notification badge when present).
+- Wrapped the news and vertical video sections in higher-contrast section containers with subtle gradients/borders for stronger separation from the dark background.
+- Upgraded `NewsCard` and `VideoReelCard` visual accents (category dot, footer metadata chip row, clip label overlay) while preserving existing interactions and information density.
 
 ### Files Touched
 
-- `HYBRID_FEED_ARCHITECTURE_PLAN.md`
-- `ASYNC_AGENT_BACKLOG.md`
+- `PatchNotes/Views/HomeView.swift`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
 
-- None (planning/documentation milestone).
+- None.
 
 ### Verification
 
-- Planning/documentation milestone; no app or DB code changes, so `xcodebuild` and Supabase migration apply were not rerun.
-- Static verification only:
-  - audited current DB feed views/migrations (`hot_feed_view`, `following_feed_view`, `posts`, `post_metrics`, `tweets_cache`)
-  - audited client feed coupling (`Post`, `FeedService`, `AppStore`, `FeedView`) to confirm the "extend `posts`" path minimizes churn
+- `HOME=/tmp/codex-home-async CLANG_MODULE_CACHE_PATH=/tmp/codex-clang-module-cache SWIFTPM_MODULECACHE_OVERRIDE=/tmp/codex-swiftpm-cache xcodebuild -scheme PatchNotes -destination 'generic/platform=iOS' -configuration Debug -derivedDataPath /tmp/codex-derived-data build` failed in sandbox:
+  - CoreSimulator service connection unavailable (sandbox environment)
+  - SwiftPM dependency resolution blocked by network/DNS restriction (`Could not resolve host: github.com`)
+- Static review of `HomeView.swift` changes completed (no syntax issues found in the edited regions).
 
 ### Open Risks / Notes
 
-- Batch 5 operational work remains pending outside sandbox: apply tweets-cache migrations, deploy `syncTweets`, and validate cron schedules/runs.
-- Batch 7 implementation will need a careful migration to add source metadata columns/unique indexes on `posts` without disturbing existing feed views and post creation paths.
-- This automation worktree cannot check out `codex/async-dev` directly because that branch is already attached to another local worktree, so work was performed on a detached `HEAD` aligned to `origin/codex/async-dev` and should be pushed back to `codex/async-dev`.
-- Live validation is still pending outside sandbox for Batch 5; Batch 6 is design-complete only.
+- The new `Daily Pulse Board` stat pills are intentionally compact; confirm text fit on smaller devices / larger text settings in a full simulator run.
+- This pass avoids the in-progress local feed badge scaffold (`PatchNotes/Feed/`, `PatchNotesTests/`, `docs/`) to prevent conflicts.
+- Upstream async work also completed Batch 6 hybrid feed architecture planning; Batch 7 implementation can now follow the documented plan.
 
 ## Next Recommended Action
 
-- Implement Batch 7 using `HYBRID_FEED_ARCHITECTURE_PLAN.md`: add source metadata columns/indexes to `posts`, extend feed views, build a server-side `tweets_cache` -> `posts` projection path, then add source labels in `FeedView`.
+- Implement Batch 7 using `HYBRID_FEED_ARCHITECTURE_PLAN.md` (source metadata + projection into `posts` + feed labels), or take Batch 12 as a UI-only fallback if backend/Supabase work is blocked in the current environment.

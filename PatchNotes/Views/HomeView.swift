@@ -29,38 +29,76 @@ struct HomeView: View {
                     subtitle: "Curated gaming news, studio updates, and creator clips."
                 )
 
-                ForEach(store.newsFeed) { item in
-                    NewsCard(item: item)
-                }
-
-                SectionHeader(
-                    title: "Vertical Video Feed",
-                    subtitle: "Play in-app and open each video's discussion thread with emoji reactions and nested replies."
+                HomePulseOverviewCard(
+                    newsCount: store.newsFeed.count,
+                    clipCount: store.shortVideos.count,
+                    followedGameCount: store.followedGameIDs.count,
+                    unreadNotificationsCount: store.unreadNotificationsCount
                 )
 
-                LazyVStack(spacing: 14) {
-                    ForEach(store.shortVideos) { clip in
-                        VideoReelCard(
-                            clip: clip,
-                            isPlaying: playingClipID == clip.id,
-                            onPlayToggle: {
-                                withAnimation(.easeInOut(duration: 0.22)) {
-                                    if playingClipID == clip.id {
-                                        playingClipID = nil
-                                    } else {
-                                        playingClipID = clip.id
+                HomeFeedSectionContainer(
+                    title: "News Wire",
+                    subtitle: "Fast headlines with a cleaner thread-like stack treatment."
+                ) {
+                    VStack(spacing: 10) {
+                        ForEach(store.newsFeed) { item in
+                            NewsCard(item: item)
+                        }
+                    }
+                }
+
+                HomeFeedSectionContainer(
+                    title: "Vertical Video Feed",
+                    subtitle: "Play in-app and open each video thread with reactions and nested replies."
+                ) {
+                    LazyVStack(spacing: 14) {
+                        ForEach(store.shortVideos) { clip in
+                            VideoReelCard(
+                                clip: clip,
+                                isPlaying: playingClipID == clip.id,
+                                onPlayToggle: {
+                                    withAnimation(.easeInOut(duration: 0.22)) {
+                                        if playingClipID == clip.id {
+                                            playingClipID = nil
+                                        } else {
+                                            playingClipID = clip.id
+                                        }
                                     }
+                                },
+                                onDiscuss: {
+                                    discussionClip = clip
                                 }
-                            },
-                            onDiscuss: {
-                                discussionClip = clip
-                            }
-                        )
+                            )
+                        }
                     }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 28)
+        }
+        .background {
+            ZStack {
+                LinearGradient(
+                    colors: [AppTheme.bgTop, AppTheme.bgBottom],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                RadialGradient(
+                    colors: [AppTheme.accentBlue.opacity(0.14), Color.clear],
+                    center: .topLeading,
+                    startRadius: 20,
+                    endRadius: 380
+                )
+                .ignoresSafeArea()
+                RadialGradient(
+                    colors: [AppTheme.accent.opacity(0.12), Color.clear],
+                    center: .center,
+                    startRadius: 40,
+                    endRadius: 460
+                )
+                .ignoresSafeArea()
+            }
         }
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
@@ -83,9 +121,14 @@ private struct NewsCard: View {
         GlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text(item.category.uppercased())
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.85))
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(item.isHot ? AppTheme.accent : AppTheme.accentBlue)
+                            .frame(width: 10, height: 10)
+                        Text(item.category.uppercased())
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
                     if item.isHot {
                         HotBadge()
                     }
@@ -106,7 +149,31 @@ private struct NewsCard: View {
                 Text(item.summary)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white.opacity(0.78))
+
+                HStack(spacing: 8) {
+                    Label(item.isHot ? "Trending" : "Fresh", systemImage: item.isHot ? "flame.fill" : "sparkles")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.84))
+                    Spacer()
+                    Text("Story")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(AppTheme.accent.opacity(0.12), in: Capsule())
+                }
             }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.18), Color.clear],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.category) news: \(item.headline)")
@@ -163,6 +230,18 @@ private struct VideoReelCard: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
                         .stroke(Color.white.opacity(0.20), lineWidth: 1)
+                }
+                .overlay(alignment: .topLeading) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles.tv.fill")
+                        Text("CLIP")
+                    }
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(.white.opacity(0.95))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.28), in: Capsule())
+                    .padding(12)
                 }
 
             Button {
@@ -237,6 +316,135 @@ private struct VideoReelCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Video clip: \(clip.title)")
         .accessibilityHint("Plays in-app with a discussion thread")
+    }
+}
+
+private struct HomePulseOverviewCard: View {
+    let newsCount: Int
+    let clipCount: Int
+    let followedGameCount: Int
+    let unreadNotificationsCount: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Daily Pulse Board")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Text("A quick scan of what is loaded in your current session.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.68))
+                }
+                Spacer()
+                if unreadNotificationsCount > 0 {
+                    Text("\(unreadNotificationsCount) new")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(AppTheme.accent.opacity(0.78), in: Capsule())
+                }
+            }
+
+            HStack(spacing: 8) {
+                HomePulseStatPill(icon: "newspaper.fill", label: "News", value: "\(newsCount)")
+                HomePulseStatPill(icon: "play.rectangle.fill", label: "Clips", value: "\(clipCount)")
+                HomePulseStatPill(icon: "dot.radiowaves.left.and.right", label: "Following", value: "\(followedGameCount)")
+            }
+        }
+        .padding(14)
+        .background(
+            LinearGradient(
+                colors: [AppTheme.surfaceTop.opacity(0.98), AppTheme.surfaceBottom.opacity(0.99)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        }
+    }
+}
+
+private struct HomePulseStatPill: View {
+    let icon: String
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.accentBlue)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.64))
+                Text(value)
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(.white)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
+    }
+}
+
+private struct HomeFeedSectionContainer<Content: View>: View {
+    let title: String
+    let subtitle: String
+    let content: Content
+
+    init(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Text(subtitle)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.66))
+                }
+                Spacer()
+            }
+
+            content
+        }
+        .padding(12)
+        .background(
+            LinearGradient(
+                colors: [Color.white.opacity(0.05), Color.white.opacity(0.02)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
     }
 }
 
