@@ -71,7 +71,9 @@ final class AppStore: ObservableObject {
     private var pendingCommentRealtimePostIDs: Set<UUID>
     private var pendingCommentRealtimeRefreshTask: Task<Void, Never>?
     private var pendingNotificationsRefreshTask: Task<Void, Never>?
+    private var pendingFollowingFeedRealtimeRefreshTask: Task<Void, Never>?
     private var inFlightFollowToggleGameIDs: Set<Game.ID>
+    private var hasLoadedFollowingFeedOnce: Bool
 
     init(
         dataProvider: AppDataProviding = MockAppDataProvider(),
@@ -123,6 +125,7 @@ final class AppStore: ObservableObject {
         self.inFlightCommentReactionKeys = []
         self.pendingCommentRealtimePostIDs = []
         self.inFlightFollowToggleGameIDs = []
+        self.hasLoadedFollowingFeedOnce = false
         refresh(referenceDate: referenceDate)
         configureFeedOwnership()
     }
@@ -317,6 +320,7 @@ final class AppStore: ObservableObject {
             followedGameIDs = []
             followedGamesErrorMessage = nil
             followedGamesIsLoading = false
+            hasLoadedFollowingFeedOnce = false
         }
 
         if session == nil {
@@ -341,6 +345,9 @@ final class AppStore: ObservableObject {
             pendingCommentRealtimeRefreshTask = nil
             pendingNotificationsRefreshTask?.cancel()
             pendingNotificationsRefreshTask = nil
+            pendingFollowingFeedRealtimeRefreshTask?.cancel()
+            pendingFollowingFeedRealtimeRefreshTask = nil
+            hasLoadedFollowingFeedOnce = false
         }
     }
 
@@ -659,6 +666,7 @@ final class AppStore: ObservableObject {
             cachePublicProfiles(from: fetched)
             await refreshPublicProfiles(for: fetched.compactMap(\.authorID))
             await hydrateGameCatalog(for: fetched)
+            hasLoadedFollowingFeedOnce = true
             followingPosts = fetched.sorted(by: Self.sortPosts)
             let postIDs = fetched.map(\.id)
             await refreshReactionState(for: postIDs)
@@ -760,6 +768,13 @@ final class AppStore: ObservableObject {
                 return
             }
 
+            let shouldReconcileFollowingFeedMembership = hasLoadedFollowingFeedOnce
+                && !followingPosts.contains(where: { $0.id == postId })
+                && {
+                    guard let gameID = updated.gameID else { return false }
+                    return followedGameIDs.contains(gameID)
+                }()
+
             if let index = posts.firstIndex(where: { $0.id == postId }) {
                 let previousCommentCount = posts[index].comment_count
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -792,6 +807,9 @@ final class AppStore: ObservableObject {
                 } else {
                     // No full-feed realtime refetch here; manual refresh/load can reconcile membership.
                 }
+            }
+            if shouldReconcileFollowingFeedMembership {
+                scheduleFollowingFeedRealtimeRefresh()
             }
             cachePublicProfiles(from: [updated])
             if let authorID = updated.authorID {
@@ -1102,6 +1120,22 @@ final class AppStore: ObservableObject {
             guard !Task.isCancelled else { return }
             self.pendingNotificationsRefreshTask = nil
             await self.refreshNotifications()
+        }
+    }
+
+    private func scheduleFollowingFeedRealtimeRefresh() {
+        guard authenticatedSession != nil else { return }
+        guard hasLoadedFollowingFeedOnce else { return }
+        guard !followedGameIDs.isEmpty else { return }
+
+        pendingFollowingFeedRealtimeRefreshTask?.cancel()
+        pendingFollowingFeedRealtimeRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            self.pendingFollowingFeedRealtimeRefreshTask = nil
+            guard !self.followingFeedIsLoading else { return }
+            await self.refreshFollowingFeed()
         }
     }
 
