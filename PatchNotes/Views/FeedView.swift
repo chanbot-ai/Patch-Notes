@@ -1,6 +1,7 @@
 import SwiftUI
 import Foundation
 import Supabase
+import ImageIO
 
 private enum FeedScope: String, CaseIterable, Identifiable {
     case hot
@@ -40,6 +41,56 @@ private extension URL {
             || host.hasSuffix(".twitter.com")
         guard supportedHost else { return false }
         return pathComponents.contains("status")
+    }
+}
+
+private enum RemoteImageAspectRatioProbe {
+    private static let cache = NSCache<NSURL, NSNumber>()
+
+    static func aspectRatio(for url: URL) async -> CGFloat? {
+        if let cached = cache.object(forKey: url as NSURL) {
+            return CGFloat(truncating: cached)
+        }
+
+        var request = URLRequest(url: url)
+        request.cachePolicy = .returnCacheDataElseLoad
+        request.timeoutInterval = 15
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse,
+               !(200...399).contains(httpResponse.statusCode) {
+                return nil
+            }
+
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let pixelWidth = numericValue(properties[kCGImagePropertyPixelWidth]),
+                  let pixelHeight = numericValue(properties[kCGImagePropertyPixelHeight]),
+                  pixelWidth > 0,
+                  pixelHeight > 0 else {
+                return nil
+            }
+
+            let ratio = pixelWidth / pixelHeight
+            cache.setObject(NSNumber(value: Double(ratio)), forKey: url as NSURL)
+            return ratio
+        } catch {
+            return nil
+        }
+    }
+
+    private static func numericValue(_ value: Any?) -> CGFloat? {
+        switch value {
+        case let number as NSNumber:
+            return CGFloat(number.doubleValue)
+        case let intValue as Int:
+            return CGFloat(intValue)
+        case let doubleValue as Double:
+            return CGFloat(doubleValue)
+        default:
+            return nil
+        }
     }
 }
 
@@ -317,17 +368,30 @@ private struct FeedPostRow: View {
                 Text(authorText)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.65))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onOpenComments()
+                    }
             }
             if let title = post.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
                 Text(title)
                     .font(.headline)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onOpenComments()
+                    }
             } else {
                 Text(post.type.capitalized)
                     .font(.headline)
                     .foregroundStyle(.white.opacity(0.92))
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onOpenComments()
+                    }
             }
 
             if let linkedGame {
@@ -345,9 +409,20 @@ private struct FeedPostRow: View {
                     .foregroundStyle(.white.opacity(0.72))
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onOpenComments()
+                    }
             }
 
             PostMediaPreview(post: post, height: 190, onVideoTap: onOpenPostDetail)
+                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        guard post.contentType == .image else { return }
+                        onOpenComments()
+                    }
+                )
 
             if !reactionTypes.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -416,14 +491,16 @@ private struct FeedPostRow: View {
             .buttonStyle(.plain)
         }
         .padding(14)
-        .background(
-            LinearGradient(
-                colors: [Color.white.opacity(0.06), Color.white.opacity(0.03)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.06), Color.white.opacity(0.03)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
@@ -477,6 +554,38 @@ private struct PostMediaPreview: View {
     var height: CGFloat = 190
     var onVideoTap: (() -> Void)? = nil
     @State private var showingVideoPlayback = false
+    @State private var measuredContainerWidth: CGFloat = 0
+    @State private var measuredImageAspectRatio: CGFloat?
+
+    private var aspectProbeURL: URL? {
+        guard post.contentType == .image,
+              let mediaURL = post.mediaURL,
+              !mediaURL.isGIFAsset else {
+            return nil
+        }
+        return mediaURL
+    }
+
+    private var previewHeight: CGFloat {
+        guard post.contentType == .image,
+              let mediaURL = post.mediaURL,
+              !mediaURL.isGIFAsset else {
+            return height
+        }
+
+        let fallbackHeight = min(max(height * 1.45, height), 340)
+
+        guard let measuredImageAspectRatio,
+              measuredImageAspectRatio > 0,
+              measuredContainerWidth > 1 else {
+            return fallbackHeight
+        }
+
+        let idealHeight = measuredContainerWidth / measuredImageAspectRatio
+        let minHeight = max(height * 1.1, height)
+        let maxHeight = min(max(height * 2.2, height), 420)
+        return min(max(idealHeight, minHeight), maxHeight)
+    }
 
     var body: some View {
         Group {
@@ -484,7 +593,8 @@ private struct PostMediaPreview: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(Color.black.opacity(0.28))
-                        .frame(height: height)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: previewHeight)
 
                     switch post.contentType {
                     case .text:
@@ -492,25 +602,34 @@ private struct PostMediaPreview: View {
                     case .image:
                         if mediaURL.isGIFAsset {
                             EmbeddedVideoPlayer(source: .web(mediaURL))
-                                .frame(height: height)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: previewHeight)
                                 .allowsHitTesting(false)
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         } else {
-                            RemoteMediaImage(primaryURL: mediaURL, fallbackURL: MediaFallback.gameScreenshot)
-                                .frame(height: height)
+                            RemoteMediaImage(
+                                primaryURL: mediaURL,
+                                fallbackURL: MediaFallback.gameScreenshot,
+                                contentMode: .fit
+                            )
+                                .frame(maxWidth: .infinity)
+                                .frame(height: previewHeight)
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
                     case .link:
                         ExternalLinkPreviewCard(url: mediaURL)
-                            .frame(height: height)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: previewHeight)
                     case .video:
                         let previewURL = post.thumbnailURL ?? mediaURL
                         RemoteMediaImage(primaryURL: previewURL, fallbackURL: MediaFallback.videoThumbnail)
-                            .frame(height: height)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: previewHeight)
+                            .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .overlay {
                                 Image(systemName: "play.circle.fill")
-                                    .font(.system(size: height * 0.3, weight: .bold))
+                                    .font(.system(size: previewHeight * 0.3, weight: .bold))
                                     .foregroundStyle(.white)
                                     .shadow(color: .black.opacity(0.45), radius: 8, y: 3)
                             }
@@ -524,17 +643,43 @@ private struct PostMediaPreview: View {
                             }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear {
+                                updateMeasuredContainerWidth(proxy.size.width)
+                            }
+                            .onChange(of: proxy.size.width) { _, newWidth in
+                                updateMeasuredContainerWidth(newWidth)
+                            }
+                    }
+                }
                 .overlay {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(Color.white.opacity(0.16), lineWidth: 1)
                 }
             }
         }
+        .task(id: aspectProbeURL) {
+            guard let aspectProbeURL else {
+                measuredImageAspectRatio = nil
+                return
+            }
+            measuredImageAspectRatio = await RemoteImageAspectRatioProbe.aspectRatio(for: aspectProbeURL)
+        }
         .sheet(isPresented: $showingVideoPlayback) {
             if let mediaURL = post.mediaURL {
                 InAppSafariView(url: mediaURL)
                     .ignoresSafeArea()
             }
+        }
+    }
+
+    private func updateMeasuredContainerWidth(_ newWidth: CGFloat) {
+        guard newWidth.isFinite, newWidth > 0 else { return }
+        if abs(measuredContainerWidth - newWidth) > 0.5 {
+            measuredContainerWidth = newWidth
         }
     }
 }

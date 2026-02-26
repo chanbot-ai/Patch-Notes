@@ -127,13 +127,20 @@ struct RemoteMediaImage: View {
     let primaryURL: URL?
     let alternatePrimaryURLs: [URL]
     let fallbackURL: URL
+    let contentMode: ContentMode
 
     @State private var candidateIndex = 0
 
-    init(primaryURL: URL?, fallbackURL: URL, alternatePrimaryURLs: [URL] = []) {
+    init(
+        primaryURL: URL?,
+        fallbackURL: URL,
+        alternatePrimaryURLs: [URL] = [],
+        contentMode: ContentMode = .fill
+    ) {
         self.primaryURL = primaryURL
         self.alternatePrimaryURLs = alternatePrimaryURLs
         self.fallbackURL = fallbackURL
+        self.contentMode = contentMode
     }
 
     private var candidateURLs: [URL] {
@@ -213,10 +220,22 @@ struct RemoteMediaImage: View {
         }
     }
 
+    @ViewBuilder
     private func resolvedImage(_ image: Image) -> some View {
-        image
-            .resizable()
-            .scaledToFill()
+        switch contentMode {
+        case .fill:
+            image
+                .resizable()
+                .scaledToFill()
+        case .fit:
+            image
+                .resizable()
+                .scaledToFit()
+        @unknown default:
+            image
+                .resizable()
+                .scaledToFit()
+        }
     }
 
     private func hasRemainingCandidate(after url: URL) -> Bool {
