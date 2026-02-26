@@ -37,6 +37,9 @@ const json = (body: unknown, status = 200) =>
     headers: { "content-type": "application/json; charset=utf-8" },
   });
 
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
@@ -59,6 +62,16 @@ function parsePositiveIntEnv(name: string): number | null {
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new Error(`Invalid positive integer env for ${name}: ${raw}`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeIntEnv(name: string): number | null {
+  const raw = Deno.env.get(name)?.trim();
+  if (!raw) return null;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid non-negative integer env for ${name}: ${raw}`);
   }
   return parsed;
 }
@@ -306,6 +319,7 @@ Deno.serve(async (request) => {
     const maxHandlesPerRunCap = parsePositiveIntEnv("TWITTER_SYNC_MAX_HANDLES_PER_RUN_CAP") ?? 20;
     const defaultMaxTotalTweetsPerRun = parsePositiveIntEnv("TWITTER_SYNC_DEFAULT_MAX_TOTAL_TWEETS_PER_RUN") ?? 60;
     const maxTotalTweetsPerRunCap = parsePositiveIntEnv("TWITTER_SYNC_MAX_TOTAL_TWEETS_PER_RUN_CAP") ?? 200;
+    const requestSpacingMs = parseNonNegativeIntEnv("TWITTER_SYNC_MIN_REQUEST_INTERVAL_MS") ?? 0;
 
     const body = ((await request.json().catch(() => ({}))) ?? {}) as SyncRequest;
     const requestedHandles = (body.handles ?? [])
@@ -357,6 +371,7 @@ Deno.serve(async (request) => {
     const fetchStats: Array<{ handle: string; fetched: number; normalized: number }> = [];
     let totalFetched = 0;
     let budgetStopped = false;
+    let lastProviderRequestStartedAt: number | null = null;
 
     for (const handle of selectedHandles) {
       if (normalizedRows.length >= maxTotalTweets) {
@@ -365,6 +380,13 @@ Deno.serve(async (request) => {
       }
       const remainingBudget = Math.max(maxTotalTweets - normalizedRows.length, 1);
       const requestCount = Math.min(perHandleLimit, remainingBudget);
+      if (requestSpacingMs > 0 && lastProviderRequestStartedAt != null) {
+        const elapsedMs = Date.now() - lastProviderRequestStartedAt;
+        if (elapsedMs < requestSpacingMs) {
+          await sleep(requestSpacingMs - elapsedMs);
+        }
+      }
+      lastProviderRequestStartedAt = Date.now();
       const rawTweets = await fetchTweetsForHandle(handle, requestCount, twitterAPIKey);
       let normalizedCount = 0;
       totalFetched += rawTweets.length;
@@ -398,6 +420,7 @@ Deno.serve(async (request) => {
         perHandleLimit,
         maxHandles,
         maxTotalTweets,
+        requestSpacingMs,
         budgetStopped,
         stats: fetchStats,
         totalFetched,
@@ -426,6 +449,7 @@ Deno.serve(async (request) => {
       perHandleLimit,
       maxHandles,
       maxTotalTweets,
+      requestSpacingMs,
       budgetStopped,
       stats: fetchStats,
       totalFetched,
