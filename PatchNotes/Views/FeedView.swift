@@ -201,6 +201,7 @@ struct FeedView: View {
                     post: post,
                     authorProfile: store.publicProfile(for: post.authorID),
                     linkedGame: store.game(for: post.gameID),
+                    badgeGame: store.game(for: post.primaryBadgeGameID ?? post.gameID),
                     reactionCountOverride: store.reactionTotal(for: post),
                     reactionTypes: store.reactionTypes,
                     reactionCounts: store.reactionCountsByPost[post.id] ?? [],
@@ -355,6 +356,7 @@ private struct FeedPostRow: View {
     let post: Post
     let authorProfile: PublicProfile?
     let linkedGame: Game?
+    let badgeGame: Game?
     let reactionCountOverride: Int
     let reactionTypes: [ReactionType]
     let reactionCounts: [PostReactionCount]
@@ -364,6 +366,10 @@ private struct FeedPostRow: View {
     let onOpenComments: () -> Void
 
     var body: some View {
+        let badgeKey = primaryBadgeKey
+        let badgeTitle = badgeGameTitle
+        let badgeAlias = badgeCompactAlias
+
         VStack(alignment: .leading, spacing: 8) {
             if let authorText = authorDisplayName {
                 Text(authorText)
@@ -375,6 +381,10 @@ private struct FeedPostRow: View {
                         onOpenComments()
                     }
             }
+            if post.isExternalSource {
+                PostSourceMetaRow(post: post)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if let title = post.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
                 Text(title)
                     .font(.headline)
@@ -385,7 +395,7 @@ private struct FeedPostRow: View {
                         onOpenComments()
                     }
             } else {
-                Text(post.type.capitalized)
+                Text(post.fallbackHeadlineText)
                     .font(.headline)
                     .foregroundStyle(.white.opacity(0.92))
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -506,6 +516,25 @@ private struct FeedPostRow: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         }
+        .overlay(alignment: .topTrailing) {
+            cornerBadgeOverlay(key: badgeKey, gameTitle: badgeTitle, gameCompactAlias: badgeAlias)
+        }
+    }
+
+    @ViewBuilder
+    private func cornerBadgeOverlay(
+        key: FeedBadgeKey,
+        gameTitle: String?,
+        gameCompactAlias: String?
+    ) -> some View {
+        FeedPostCornerBadgeView(
+            key: key,
+            gameTitle: gameTitle,
+            gameCompactAlias: gameCompactAlias
+        )
+        .allowsHitTesting(false)
+        .padding(.trailing, 10)
+        .padding(.top, 8)
     }
 
     private var authorDisplayName: String? {
@@ -515,6 +544,63 @@ private struct FeedPostRow: View {
             return displayName
         }
         return "u/\(authorProfile.username)"
+    }
+
+    private var primaryBadgeKey: FeedBadgeKey {
+        if let rawBadgeKey = post.primaryBadgeKeyRaw {
+            let parsed = FeedBadgeKey(rawValue: rawBadgeKey)
+            if parsed.category != .unspecified || rawBadgeKey == FeedBadgeCategory.unspecified.rawValue {
+                return parsed
+            }
+            // Invalid server value: continue to local fallback instead of rendering as unspecified.
+        }
+        if let linkedGame {
+            return FeedBadgeKey(gameID: linkedGame.id.uuidString.lowercased())
+        }
+        if let gameID = post.gameID {
+            return FeedBadgeKey(gameID: gameID.uuidString.lowercased())
+        }
+        return FeedBadgeKey(category: .generalGaming)
+    }
+
+    private var badgeGameTitle: String? {
+        guard primaryBadgeKey.isGame else { return nil }
+        if let badgeGame {
+            return badgeGame.title
+        }
+        if post.gameID != nil {
+            return "Game"
+        }
+        return nil
+    }
+
+    private var badgeCompactAlias: String? {
+        guard primaryBadgeKey.isGame else { return nil }
+        if let title = badgeGame?.title {
+            return compactGameBadgeAlias(from: title)
+        }
+        if post.gameID != nil {
+            return "GAME"
+        }
+        return nil
+    }
+
+    private func compactGameBadgeAlias(from title: String) -> String {
+        let parts = title
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+
+        if parts.count >= 2 {
+            let initials = parts
+                .prefix(4)
+                .compactMap(\.first)
+            let alias = String(initials).uppercased()
+            if !alias.isEmpty {
+                return alias
+            }
+        }
+
+        return String(title.prefix(4)).uppercased()
     }
 }
 
@@ -546,6 +632,74 @@ private struct GameContextChip: View {
         .overlay {
             Capsule()
                 .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        }
+    }
+}
+
+private struct PostSourceMetaRow: View {
+    let post: Post
+    var showsOpenLink: Bool = false
+
+    private var sourceLabel: String? {
+        post.sourcePillLabel
+    }
+
+    private var sourceURL: URL? {
+        post.sourceURL
+    }
+
+    private var sourceActionLabel: String {
+        if post.sourceProviderDisplayName == "X" {
+            return "Open Original X Post"
+        }
+        return "Open Original"
+    }
+
+    private var iconName: String {
+        if post.sourceProviderDisplayName == "X" {
+            return "bubble.left.and.bubble.right.fill"
+        }
+        return "link"
+    }
+
+    var body: some View {
+        Group {
+            if sourceLabel != nil || (showsOpenLink && sourceURL != nil) {
+                HStack(spacing: 8) {
+                    if let sourceLabel {
+                        HStack(spacing: 6) {
+                            Image(systemName: iconName)
+                                .font(.caption2.weight(.bold))
+                            Text(sourceLabel)
+                                .lineLimit(1)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.86))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.white.opacity(0.08), in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        }
+                    }
+
+                    if showsOpenLink, let sourceURL {
+                        Link(destination: sourceURL) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.up.right")
+                                Text(sourceActionLabel)
+                            }
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.accent)
+                            .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+            }
         }
     }
 }
@@ -755,7 +909,7 @@ private struct ExternalLinkPreviewCard: View {
     }
 }
 
-private struct PostCommentsDetailView: View {
+struct PostCommentsDetailView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
@@ -1025,8 +1179,15 @@ private struct PostCommentsDetailView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.65))
             }
+            if post.isExternalSource {
+                PostSourceMetaRow(post: post, showsOpenLink: true)
+            }
             if let title = post.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
                 Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+            } else if post.isExternalSource {
+                Text(post.fallbackHeadlineText)
                     .font(.headline)
                     .foregroundStyle(.white)
             }

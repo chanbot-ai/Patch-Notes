@@ -13,13 +13,98 @@ struct Post: Identifiable, Decodable {
     let reaction_count: Int?
     let comment_count: Int?
     let hot_score: Double?
+    let primary_badge_key: String?
+    let secondary_badge_key: String?
+    let badge_confidence_tier: String?
+    let badge_confidence_score: Double?
+    let badge_assignment_source: String?
+    let badge_assignment_status: String?
+    let badge_assigned_at: Date?
     let author_username: String?
     let author_display_name: String?
     let author_avatar_url: String?
     let author_created_at: Date?
+    let source_kind: String?
+    let source_provider: String?
+    let source_external_id: String?
+    let source_handle: String?
+    let source_url: String?
+    let source_published_at: Date?
 
     var authorID: UUID? { author_id }
     var gameID: UUID? { game_id }
+
+    var primaryBadgeKeyRaw: String? {
+        normalizedBadgeKeyString(primary_badge_key)
+    }
+
+    var secondaryBadgeKeyRaw: String? {
+        normalizedBadgeKeyString(secondary_badge_key)
+    }
+
+    var primaryBadgeGameID: UUID? {
+        guard let raw = primaryBadgeKeyRaw?.lowercased(),
+              raw.hasPrefix("game:") else { return nil }
+        let idString = String(raw.dropFirst("game:".count))
+        return UUID(uuidString: idString)
+    }
+
+    var sourceKindRaw: String? {
+        normalizedOptionalString(source_kind)?.lowercased()
+    }
+
+    var sourceProviderRaw: String? {
+        normalizedOptionalString(source_provider)?.lowercased()
+    }
+
+    var sourceHandleDisplay: String? {
+        guard let raw = normalizedOptionalString(source_handle) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+        guard !trimmed.isEmpty else { return nil }
+        return "@\(trimmed)"
+    }
+
+    var sourceURL: URL? {
+        guard let source_url,
+              !source_url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return URL(string: source_url)
+    }
+
+    var isExternalSource: Bool {
+        sourceKindRaw == "external" || sourceProviderRaw != nil || sourceURL != nil
+    }
+
+    var sourceProviderDisplayName: String? {
+        if let provider = sourceProviderRaw {
+            switch provider {
+            case "twitterapi.io":
+                return "X"
+            default:
+                return provider
+            }
+        }
+        if sourceURL?.isTwitterStatusURL == true {
+            return "X"
+        }
+        return nil
+    }
+
+    var sourcePillLabel: String? {
+        guard isExternalSource else { return nil }
+        let provider = sourceProviderDisplayName
+        let handle = sourceHandleDisplay
+        if let provider, let handle {
+            return "\(provider) \(handle)"
+        }
+        return provider ?? handle ?? "External"
+    }
+
+    var fallbackHeadlineText: String {
+        if let provider = sourceProviderDisplayName {
+            return provider == "X" ? "X Post" : "\(provider.capitalized) Post"
+        }
+        return type.capitalized
+    }
 
     var authorProfile: PublicProfile? {
         guard let authorID,
@@ -55,6 +140,9 @@ struct Post: Identifiable, Decodable {
         if let mediaURL, mediaURL.isTwitterStatusURL {
             return .link
         }
+        if sourceURL?.isTwitterStatusURL == true {
+            return .link
+        }
         return mediaURL == nil ? .text : .image
     }
 
@@ -68,6 +156,16 @@ struct Post: Identifiable, Decodable {
         guard let thumbnail_url,
               !thumbnail_url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return URL(string: thumbnail_url)
+    }
+
+    private func normalizedBadgeKeyString(_ raw: String?) -> String? {
+        normalizedOptionalString(raw)
+    }
+
+    private func normalizedOptionalString(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

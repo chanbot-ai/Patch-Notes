@@ -403,8 +403,45 @@ final class FeedService {
 
         let fallback = try await client
             .from("posts")
-            .select("id,author_id,game_id,title,body,media_url,thumbnail_url,type,created_at")
+            .select("id,author_id,game_id,title,body,media_url,thumbnail_url,type,created_at,source_kind,source_provider,source_external_id,source_handle,source_url,source_published_at")
             .eq("id", value: postID.uuidString)
+            .limit(1)
+            .execute()
+
+        return try makeDatabaseDecoder().decode([Post].self, from: fallback.data).first
+    }
+
+    func fetchExternalSourcePost(
+        provider: String,
+        externalID: String
+    ) async throws -> Post? {
+        let normalizedProvider = provider
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedExternalID = externalID.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedProvider.isEmpty, !normalizedExternalID.isEmpty else {
+            return nil
+        }
+
+        let response = try await client
+            .from("hot_feed_view")
+            .select()
+            .eq("source_provider", value: normalizedProvider)
+            .eq("source_external_id", value: normalizedExternalID)
+            .limit(1)
+            .execute()
+
+        let feedPosts = try makeDatabaseDecoder().decode([Post].self, from: response.data)
+        if let post = feedPosts.first {
+            return post
+        }
+
+        let fallback = try await client
+            .from("posts")
+            .select("id,author_id,game_id,title,body,media_url,thumbnail_url,type,created_at,source_kind,source_provider,source_external_id,source_handle,source_url,source_published_at")
+            .eq("source_provider", value: normalizedProvider)
+            .eq("source_external_id", value: normalizedExternalID)
             .limit(1)
             .execute()
 

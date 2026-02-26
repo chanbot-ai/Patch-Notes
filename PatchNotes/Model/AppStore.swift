@@ -1251,6 +1251,7 @@ final class AppStore: ObservableObject {
 
     private func hydrateGameCatalog(for posts: [Post]) async {
         let gameIDs = Set(posts.compactMap(\.gameID))
+            .union(posts.compactMap(\.primaryBadgeGameID))
         guard !gameIDs.isEmpty else { return }
         let missing = gameIDs.filter { gameCatalogByID[$0] == nil }
         guard !missing.isEmpty else { return }

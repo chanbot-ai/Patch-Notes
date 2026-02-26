@@ -1,0 +1,5 @@
+source_provider,source_handle,game_title,match_priority,is_active
+twitterapi.io,marathonthegame,Marathon,10,true
+twitterapi.io,oldschoolrs,Old School RuneScape,10,true
+twitterapi.io,pragmatagame,Pragmata,10,true
+twitterapi.io,pragmata_jp,Pragmata,20,true

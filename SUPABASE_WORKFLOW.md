@@ -45,8 +45,18 @@ This repo is configured for both:
 - Run direct SQL (one query):
   `./scripts/supabase-psql.sh -c "select now();"`
 
+- Generate external source->game mappings seed SQL from CSV:
+  `./scripts/generate-external-source-mappings-seed.sh`
+
+- Apply external source->game mappings seed (X/Twitter handles -> `games`):
+  `./scripts/supabase-seed-external-source-mappings.sh`
+  (this regenerates SQL from CSV before apply)
+
 ## Recommended Usage Pattern
 
 - Use migrations for schema, RLS, triggers, and repeatable changes.
 - Use `psql` for fast inspection/debugging and one-off fixes during development.
 - After one-off fixes, convert them into a migration so the repo remains authoritative.
+- For repeatable admin mapping data (for example `external_source_game_mappings`), use CSV as source-of-truth at `supabase/seeds/external_source_game_mappings.csv`.
+- Regenerate SQL with `./scripts/generate-external-source-mappings-seed.sh` and commit both CSV + SQL changes together.
+- Apply with `./scripts/supabase-seed-external-source-mappings.sh` (auto-generates, then executes).

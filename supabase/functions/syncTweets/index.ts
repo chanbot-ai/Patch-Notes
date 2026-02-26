@@ -31,6 +31,13 @@ type ProviderResponse =
   | { tweets?: unknown[]; data?: unknown[] | { tweets?: unknown[] } }
   | Record<string, unknown>;
 
+type ProjectionResultRow = {
+  scanned_count?: number;
+  projected_count?: number;
+  inserted_count?: number;
+  updated_count?: number;
+};
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body, null, 2), {
     status,
@@ -441,6 +448,19 @@ Deno.serve(async (request) => {
       }
     }
 
+    let projection: ProjectionResultRow | null = null;
+    if (normalizedRows.length > 0) {
+      const { data, error } = await supabase.rpc("project_tweets_cache_to_posts", {
+        p_limit: Math.max(normalizedRows.length, 1),
+      });
+      if (error) {
+        throw new Error(`tweets_cache -> posts projection failed: ${error.message}`);
+      }
+      if (Array.isArray(data) && data.length > 0 && isRecord(data[0])) {
+        projection = data[0] as ProjectionResultRow;
+      }
+    }
+
     return json({
       ok: true,
       requestId: requestID,
@@ -454,6 +474,7 @@ Deno.serve(async (request) => {
       stats: fetchStats,
       totalFetched,
       upserted: normalizedRows.length,
+      projection,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

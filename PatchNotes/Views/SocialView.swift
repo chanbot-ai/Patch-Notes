@@ -2,6 +2,7 @@ import SwiftUI
 
 private struct XPulseTweet: Identifiable, Hashable {
     let id: UUID
+    let providerPostID: String
     let authorName: String
     let handle: String
     let body: String
@@ -194,7 +195,7 @@ struct SocialView: View {
                 } else {
                     ForEach(filteredTweets) { tweet in
                         NavigationLink {
-                            TweetDetailView(tweet: tweet)
+                            XPulseDiscussionDestination(tweet: tweet)
                         } label: {
                             XTweetCard(tweet: tweet)
                         }
@@ -255,6 +256,7 @@ struct SocialView: View {
 
         return XPulseTweet(
             id: row.id,
+            providerPostID: row.provider_post_id,
             authorName: displayName,
             handle: normalizedHandle,
             body: row.body,
@@ -279,6 +281,69 @@ struct SocialView: View {
         return store.socialGames.compactMap { game in
             let normalizedTitle = game.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             return searchable.contains(normalizedTitle) ? game.title : nil
+        }
+    }
+}
+
+private struct XPulseDiscussionDestination: View {
+    @EnvironmentObject private var store: AppStore
+
+    let tweet: XPulseTweet
+
+    @State private var projectedPost: Post?
+    @State private var routeResolved = false
+
+    private let feedService = FeedService()
+
+    var body: some View {
+        Group {
+            if let projectedPost {
+                PostCommentsDetailView(post: projectedPost)
+                    .environmentObject(store)
+            } else if routeResolved {
+                TweetDetailView(tweet: tweet)
+            } else {
+                ScrollView {
+                    GlassCard {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .tint(.white)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Opening discussion")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                Text("Checking for a synced feed post...")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.7))
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                }
+                .navigationTitle("X Post")
+                .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .task(id: tweet.id) {
+            await resolveRouteIfNeeded()
+        }
+    }
+
+    @MainActor
+    private func resolveRouteIfNeeded() async {
+        guard !routeResolved, projectedPost == nil else { return }
+
+        defer { routeResolved = true }
+
+        do {
+            projectedPost = try await feedService.fetchExternalSourcePost(
+                provider: "twitterapi.io",
+                externalID: tweet.providerPostID
+            )
+        } catch {
+            print("Failed to resolve projected X Pulse post:", error)
         }
     }
 }
