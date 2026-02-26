@@ -6,50 +6,48 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Supabase cron validation pass + syncTweets gateway auth/header fix follow-up
+- Last milestone: Supabase cron jobs enabled with manual scheduling fallback; syncTweets now blocked by missing provider API key
 
 ## Latest Milestone
 
 ### Summary
 
-- Took the recommended Supabase validation step for external-feed cron sync and confirmed the remote project is currently not scheduling `sync_tweets_cache_30m`: `cron` and `net` schemas/extensions are absent, `app.settings.supabase_url` / `app.settings.sync_tweets_webhook_secret` are unset, and `public.tweets_cache` has no rows.
-- Redeployed Supabase Edge Function `syncTweets` from `codex/async-dev` after moving `verify_jwt = false` into root `supabase/config.toml` (the deploy path did not honor the per-function `config.toml` file).
-- Live endpoint probes showed the Supabase Edge gateway still requires `Authorization`/`apikey` headers even with `verify_jwt = false` (error changed from `Missing authorization header` to `Invalid JWT` when sending dummy headers), so the cron SQL needed a follow-up fix.
-- Added a new migration to reschedule `sync_tweets_cache_30m` with `Authorization` + `apikey` headers sourced from `app.settings.supabase_anon_key` (plus existing `x-cron-secret`) when cron/net/settings are available.
+- Executed the recommended Supabase infra follow-up and enabled `pg_cron` + `pg_net` on the remote database (they were available but not installed).
+- Verified `app.settings.supabase_url` / `app.settings.supabase_anon_key` still cannot be set from this DB connection (`permission denied to set parameter`) via both `ALTER DATABASE` and `ALTER ROLE`, so the migration-based scheduler path remains blocked on admin/dashboard-level config.
+- Used a safe operational fallback to manually register `tweets_cache_retention_daily` and `sync_tweets_cache_30m` cron jobs directly in `cron.job` (including `Authorization` + `apikey` headers for the `syncTweets` Edge Function call).
+- Verified authenticated `syncTweets` requests now reach function logic and fail on the next blocker: missing Edge Function env `TWITTERAPI_IO_API_KEY`.
 
 ### Files Touched
 
-- `supabase/config.toml`
-- `supabase/functions/syncTweets/config.toml` (removed; deploy did not use per-function config file)
-- `supabase/migrations/20260226163000_fix_sync_tweets_cron_auth_headers.sql`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
 
-- `20260226163000_fix_sync_tweets_cron_auth_headers.sql` applied via `scripts/supabase-cli.sh db push` (remote emitted notice and no-oped because `cron` extension/schema is still unavailable).
+- No new repo migration this run.
+- Remote status: `20260226163000_fix_sync_tweets_cron_auth_headers.sql` remains applied, but its scheduling logic no-op'd earlier due missing `cron` at the time. Cron jobs were registered manually this run after enabling extensions.
 
 ### Verification
 
-- Remote DB checks via `scripts/supabase-psql.sh`:
-  - `to_regnamespace('cron') = null`, `to_regnamespace('net') = null`
-  - `current_setting('app.settings.supabase_url', true)` unset
-  - `current_setting('app.settings.sync_tweets_webhook_secret', true)` unset
-  - `public.tweets_cache` row count = `0`
-- Edge Function deploy:
-  - `scripts/supabase-cli.sh functions deploy syncTweets --project-ref <ref>` succeeded (network-enabled run)
-- Supabase migration apply (network-enabled run):
-  - `scripts/supabase-cli.sh db push` applied `20260226163000_fix_sync_tweets_cron_auth_headers.sql` and emitted `Skipping syncTweets cron auth-header reschedule: cron schema/extension is unavailable.`
-- Edge gateway probes (network-enabled `curl`):
-  - no auth headers -> `401 Missing authorization header`
-  - dummy `Authorization`/`apikey` headers -> `401 Invalid JWT`
-  - confirms root `verify_jwt = false` is not enough by itself for cron; gateway still needs valid auth headers
+- Remote DB extension checks (`scripts/supabase-psql.sh`):
+  - `pg_available_extensions` includes `pg_cron` and `pg_net`
+  - `create extension if not exists pg_net;` succeeded
+  - `create extension if not exists pg_cron;` succeeded
+- `app.settings.*` write attempts:
+  - `ALTER DATABASE postgres SET "app.settings.supabase_url" ...` -> `permission denied to set parameter "app.settings.supabase_url"`
+  - `ALTER ROLE postgres SET "app.settings.supabase_url" ...` -> same permission error
+- Cron scheduling fallback (`scripts/supabase-psql.sh` manual SQL):
+  - registered active jobs in `cron.job`:
+    - `sync_tweets_cache_30m` (`*/30 * * * *`)
+    - `tweets_cache_retention_daily` (`15 4 * * *`)
+- Edge Function probe (network-enabled `curl` with valid anon auth headers):
+  - reached function runtime and returned `500` with `Missing required env: TWITTERAPI_IO_API_KEY`
 
 ### Open Risks / Notes
 
-- Cron jobs still cannot be installed on this project until `pg_cron` and `pg_net` are enabled remotely and required `app.settings.*` values are set (at minimum `supabase_url`, and now also `supabase_anon_key`; optionally `sync_tweets_webhook_secret`).
-- `.env.supabase.local` in this environment did not include `SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY`, so an authenticated live `syncTweets` invoke (and write verification into `tweets_cache`) could not be completed from this run.
-- The new auth-header migration is idempotent, but if applied before extensions/settings are present it will no-op and must be rerun manually (or by replaying the scheduling SQL) after infra prerequisites are added.
+- `sync_tweets_cache_30m` is now scheduled, but it will fail until Supabase Edge Function `syncTweets` has `TWITTERAPI_IO_API_KEY` configured (and likely handle allowlist env vars if not already set).
+- Manual cron scheduling embeds the anon key in the cron job command text as a stopgap because `app.settings.*` writes are blocked from this connection. Prefer replacing with the migration-driven `app.settings` path once admin-level config is available.
+- `public.tweets_cache` remains empty until the function env is completed and a sync run succeeds.
 
 ## Next Recommended Action
 
-- Enable `pg_cron` + `pg_net` on the Supabase project, set `app.settings.supabase_url` and `app.settings.supabase_anon_key` (and `app.settings.sync_tweets_webhook_secret` if using secret-gated cron calls), apply/re-run the new cron auth-header migration scheduling SQL, then validate `sync_tweets_cache_30m` job runs and populates `tweets_cache`.
+- Set Supabase Edge Function secret `TWITTERAPI_IO_API_KEY` (and confirm `TWITTER_SYNC_ALLOWED_HANDLES` / related sync envs), then trigger a small authenticated `syncTweets` run and verify `public.tweets_cache` rows and subsequent `cron.job_run_details` success entries.
