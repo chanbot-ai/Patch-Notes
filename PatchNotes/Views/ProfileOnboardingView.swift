@@ -642,6 +642,18 @@ struct ProfileOnboardingView: View {
         profile?.email ?? fallbackEmail
     }
 
+    private var emailLocalPartDisplayNameSeed: String? {
+        guard let email = emailLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !email.isEmpty,
+              let atIndex = email.firstIndex(of: "@") else {
+            return nil
+        }
+
+        let localPart = email[..<atIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !localPart.isEmpty else { return nil }
+        return String(localPart)
+    }
+
     private var trimmedDisplayName: String {
         displayName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -811,7 +823,7 @@ struct ProfileOnboardingView: View {
             if displayName.isEmpty || force {
                 let safeProfileUsername = profile.username.flatMap { UsernameRules.isPlaceholderUsername($0) ? nil : $0 }
                 let safeSettingsDisplayName = UsernameRules.isPlaceholderUsername(settings.displayName) ? "" : settings.displayName
-                displayName = profile.display_name ?? safeProfileUsername ?? safeSettingsDisplayName
+                displayName = profile.display_name ?? safeProfileUsername ?? emailLocalPartDisplayNameSeed ?? safeSettingsDisplayName
             }
             if username.isEmpty || force {
                 if let profileUsername = profile.username, !UsernameRules.isPlaceholderUsername(profileUsername) {
@@ -824,9 +836,21 @@ struct ProfileOnboardingView: View {
             if displayName.isEmpty || force {
                 let cachedName = settings.displayName
                 let shouldHideCachedPlaceholder = UsernameRules.isPlaceholderUsername(cachedName)
-                displayName = (settings.displayName == "Chan" || shouldHideCachedPlaceholder) ? "" : settings.displayName
+                let safeCachedName = (settings.displayName == "Chan" || shouldHideCachedPlaceholder) ? "" : settings.displayName
+                displayName = emailLocalPartDisplayNameSeed ?? safeCachedName
             }
         }
+
+#if DEBUG
+        print(
+            """
+            [ProfileOnboarding][seedFieldsIfNeeded] mode=\(String(describing: mode)) force=\(force) \
+            hasProfile=\(profile != nil) email=\(emailLabel ?? "nil") profileDisplayName=\(profile?.display_name ?? "nil") \
+            profileUsername=\(profile?.username ?? "nil") settingsDisplayName=\(settings.displayName) \
+            seededDisplayName=\(displayName) seededUsername=\(username)
+            """
+        )
+#endif
 
         hasSeeded = true
     }
