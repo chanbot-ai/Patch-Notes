@@ -64,3 +64,26 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 ## Next Recommended Action
 
 - Expand/tune the production source allowlist and per-run budgets (now that higher credits are available), then continue Batch 7 hybrid feed implementation using the verified `tweets_cache` cron pipeline as the external-source input.
+
+## Merge Milestone (2026-02-26)
+
+### Summary
+
+- Merged `main` (`c6e3583`, media sizing + tap-target improvements) into `codex/async-dev`.
+- Resolved the only merge conflict in `PatchNotes.xcodeproj/project.pbxproj` by preserving async badge file entries and re-adding `MatchDetailView.swift` with fresh Xcode object IDs (`...29` file ref / `...4C` build file) to avoid ID collisions.
+- `PatchNotes/Views/FeedView.swift` and `PatchNotes/Model/AppStore.swift` auto-merged cleanly.
+
+### Verification
+
+- Confirmed merged source includes both:
+  - main-side feed media sizing/cropping/tap-target changes (`RemoteImageAspectRatioProbe`, `RemoteMediaImage(contentMode: .fit)` in `FeedView` / `AppStyles`)
+  - async-side following-feed refresh after compose (`store.loadFollowingFeed()` callback path)
+- `xcodebuild` simulator Debug build succeeded after merge:
+  - `xcodebuild -project PatchNotes.xcodeproj -scheme PatchNotes -configuration Debug -destination id=DEA2BE7C-8B5C-4D57-8648-625511A4F6D8 -derivedDataPath /tmp/PatchNotesDerived CODE_SIGNING_ALLOWED=NO build`
+- Installed + launched merged app in booted simulator:
+  - `xcrun simctl install booted /tmp/PatchNotesDerived/Build/Products/Debug-iphonesimulator/PatchNotes.app`
+  - `xcrun simctl launch booted com.patchnotes.PatchNotes` (PID `78969`)
+
+### Notes
+
+- No Supabase migrations or remote config changes were applied in this merge-only step.

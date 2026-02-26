@@ -199,6 +199,66 @@ struct EsportsMatch: Identifiable, Hashable {
     let detailLine: String
     let subDetail: String
     let isFeatured: Bool
+    let seriesFormat: Int?  // nil = single map, 3 = Bo3, 5 = Bo5
+    let scheduledAt: Date?
+    let streamURL: URL?
+
+    init(
+        id: UUID,
+        league: String,
+        homeTeam: String,
+        awayTeam: String,
+        homeRecord: String,
+        awayRecord: String,
+        homeScore: Int,
+        awayScore: Int,
+        state: MatchState,
+        detailLine: String,
+        subDetail: String,
+        isFeatured: Bool,
+        seriesFormat: Int? = nil,
+        scheduledAt: Date? = nil,
+        streamURL: URL? = nil
+    ) {
+        self.id = id
+        self.league = league
+        self.homeTeam = homeTeam
+        self.awayTeam = awayTeam
+        self.homeRecord = homeRecord
+        self.awayRecord = awayRecord
+        self.homeScore = homeScore
+        self.awayScore = awayScore
+        self.state = state
+        self.detailLine = detailLine
+        self.subDetail = subDetail
+        self.isFeatured = isFeatured
+        self.seriesFormat = seriesFormat
+        self.scheduledAt = scheduledAt
+        self.streamURL = streamURL
+    }
+
+    /// Stable notification identifier derived from match content rather than the
+    /// ephemeral UUID, so scheduled reminders survive data refreshes.
+    var notificationIdentifier: String {
+        let epoch = scheduledAt.map { Int($0.timeIntervalSince1970) } ?? 0
+        return "match-\(league)-\(homeTeam)-\(awayTeam)-\(epoch)"
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "_")
+    }
+}
+
+struct LeagueStanding: Identifiable, Hashable {
+    let id: UUID
+    let rank: Int
+    let teamName: String
+    let wins: Int
+    let losses: Int
+
+    var record: String { "\(wins)-\(losses)" }
+    var winRate: Double {
+        let total = wins + losses
+        return total > 0 ? Double(wins) / Double(total) : 0.5
+    }
 }
 
 struct MarketOutcome: Identifiable, Hashable {

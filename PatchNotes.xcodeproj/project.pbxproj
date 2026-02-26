@@ -31,6 +31,7 @@
 		A00000000000000000000049 /* FeedBadgeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* FeedBadgeModels.swift */; };
 		A0000000000000000000004A /* FeedBadgeStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000027 /* FeedBadgeStyle.swift */; };
 		A0000000000000000000004B /* FeedBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000028 /* FeedBadgeView.swift */; };
+		A0000000000000000000004C /* MatchDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000029 /* MatchDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -58,6 +59,7 @@
 		A00000000000000000000026 /* FeedBadgeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedBadgeModels.swift; sourceTree = "<group>"; };
 		A00000000000000000000027 /* FeedBadgeStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedBadgeStyle.swift; sourceTree = "<group>"; };
 		A00000000000000000000028 /* FeedBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedBadgeView.swift; sourceTree = "<group>"; };
+		A00000000000000000000029 /* MatchDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -117,6 +119,7 @@
 				A00000000000000000000016 /* SocialView.swift */,
 				A00000000000000000000017 /* MyGamesView.swift */,
 				A00000000000000000000018 /* EsportsView.swift */,
+				A00000000000000000000029 /* MatchDetailView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -247,6 +250,7 @@
 				A00000000000000000000049 /* FeedBadgeModels.swift in Sources */,
 				A0000000000000000000004A /* FeedBadgeStyle.swift in Sources */,
 				A0000000000000000000004B /* FeedBadgeView.swift in Sources */,
+				A0000000000000000000004C /* MatchDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
