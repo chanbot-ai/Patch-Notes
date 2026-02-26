@@ -6,36 +6,39 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Release Calendar "Games This Month" spotlight polish (Batch 10)
+- Last milestone: Batch 4 external social ingestion foundation (tweets cache + `syncTweets` scaffold)
 
 ## Latest Milestone
 
 ### Summary
 
-- Added a richer `Games This Month` spotlight board above the calendar grid in `ReleaseCalendarView`, with horizontal cover-art cards for upcoming releases in the selected month.
-- Prioritized spotlight card ordering by followed/favorited titles first, then release date, so the top strip reflects the user’s current interests.
-- Added compact per-card metadata and quick actions (`Details`, follow toggle, favorite toggle) plus a lightweight social-post count signal using cached hot/following feed posts.
-- Kept the existing text agenda below the grid (renamed to `Month Agenda`) so the new visual strip complements rather than replaces the dense list.
+- Added a new Supabase migration that creates `public.tweets_cache` for server-synced X/Twitter content with provider/source metadata, raw payload retention, visibility flag, and indexes for feed reads.
+- Added a sanitized `public.tweets_cache_feed_view` and grants so app clients can read cached external posts without raw payload access.
+- Added `supabase/functions/syncTweets/index.ts`, an Edge Function scaffold that pulls from `twitterapi.io` using function env secrets only (`TWITTERAPI_IO_API_KEY`, Supabase service role), normalizes tweets defensively, enforces optional allowlist + sync secret checks, and performs idempotent upserts into `tweets_cache`.
+- Documented Batch 4 progress in the backlog while leaving the batch open for actual local migration apply/function deploy and SwiftUI cache consumption wiring.
 
 ### Files Touched
 
-- `PatchNotes/Views/ReleaseCalendarView.swift`
+- `supabase/migrations/20260226142000_create_tweets_cache_and_feed_view.sql`
+- `supabase/functions/syncTweets/index.ts`
+- `ASYNC_AGENT_BACKLOG.md`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
 
-- None.
+- `supabase/migrations/20260226142000_create_tweets_cache_and_feed_view.sql` (created, not applied in this sandbox)
 
 ### Verification
 
-- `HOME=/tmp/codex-home-async CLANG_MODULE_CACHE_PATH=/tmp/codex-clang-module-cache SWIFTPM_MODULECACHE_OVERRIDE=/tmp/codex-swiftpm-cache xcodebuild -scheme PatchNotes -destination 'generic/platform=iOS' -configuration Debug -derivedDataPath /tmp/codex-derived-data build` failed in sandbox:
-  - CoreSimulator service connection unavailable (expected sandbox limitation)
-  - SwiftPM dependency resolution failed because `github.com` DNS/network access is blocked in this environment (`Could not resolve host: github.com`)
+- Static verification only (no `supabase` CLI / `deno` / `node` binaries available in this sandbox, and network is restricted):
+  - reviewed migration SQL for schema/RLS/grants/view coverage
+  - reviewed `syncTweets` Edge Function scaffold for env-secret usage, allowlist checks, normalization, and `upsert(... onConflict: provider,provider_post_id)`
 
 ### Open Risks / Notes
 
-- New spotlight cards use currently cached `hot` + `following` posts to show a lightweight social-post count; this is intentionally opportunistic and may show `0` until feed data has loaded in-session.
+- `syncTweets` uses a best-effort defensive parser for likely `twitterapi.io` response shapes; endpoint path/fields may need adjustment against the actual provider schema during first live run.
+- Batch 4 is not complete yet: no local migration application, function deployment, or SwiftUI client read-path swap to `tweets_cache_feed_view` was possible in this sandbox run.
 
 ## Next Recommended Action
 
-- In a full Xcode environment, validate the new Release Calendar spotlight strip on iPhone sizes (tap targets + horizontal scrolling) and confirm follow/favorite toggles update the spotlight ordering as expected.
+- In a full Supabase/dev environment, apply the new migration, deploy `syncTweets` with `TWITTERAPI_IO_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and optional `TWITTER_SYNC_ALLOWED_HANDLES`/`SYNC_TWEETS_WEBHOOK_SECRET`, then wire the WIP social/home feed client to read from `public.tweets_cache_feed_view`.
