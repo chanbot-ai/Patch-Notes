@@ -2,6 +2,18 @@ import Foundation
 import Supabase
 
 final class FeedService {
+    struct CachedTweetFeedRow: Decodable {
+        let id: UUID
+        let provider_post_id: String
+        let source_handle: String
+        let author_handle: String?
+        let author_name: String?
+        let body: String
+        let canonical_url: String?
+        let metrics: [String: Int]
+        let published_at: Date
+    }
+
     private struct ReactionInsertPayload: Encodable {
         let post_id: UUID
         let user_id: UUID
@@ -253,6 +265,17 @@ final class FeedService {
             .execute()
 
         return try makeDatabaseDecoder().decode([Post].self, from: response.data)
+    }
+
+    func fetchCachedTweets(limit: Int = 40) async throws -> [CachedTweetFeedRow] {
+        let response = try await client
+            .from("tweets_cache_feed_view")
+            .select("id,provider_post_id,source_handle,author_handle,author_name,body,canonical_url,metrics,published_at")
+            .order("published_at", ascending: false)
+            .limit(limit)
+            .execute()
+
+        return try makeDatabaseDecoder().decode([CachedTweetFeedRow].self, from: response.data)
     }
 
     func fetchFollowedGameIDs(

@@ -14,8 +14,6 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
 - [ ] Batch 2 (`%%%`) Client implementation sequence: comment reactions -> comment ranking toggle (`Top/New`) -> comment pagination -> animated expansion UI -> following feed client wiring (reuse centralized reaction state keyed by post ID)
 - [ ] Batch 3 (`%%%`) Advanced social loop: nested reply UI refinement, multi-reaction comment chips, comment sorting polish, notification trigger system (backend+client), architecture stress-test/perf guardrails
 - [ ] After attempting as much as feasible from batches above, propose next feature roadmap toward “Sleeper sports app of video games” vision and begin implementing on `codex/async-dev`
-- [ ] Batch 4 (`%%%`) External social ingestion foundation (`twitterapi.io` -> Supabase Edge Function -> Postgres cache -> SwiftUI): secure server-side sync path with Supabase secrets only (no repo secrets), cache table (`tweets_cache` or equivalent) with idempotent upsert + source metadata, and client reads from Supabase cache instead of direct provider calls
-  - Progress (2026-02-26): added `public.tweets_cache` + `public.tweets_cache_feed_view` migration and `supabase/functions/syncTweets` Edge Function scaffold with env-secret validation + idempotent upsert path; remaining work is local migration apply/deploy + SwiftUI client wiring to the cache view
 - [ ] Batch 5 (`%%%`) Cron-based sync + budget guardrails for external feeds: Supabase cron-triggered `syncTweets` (start at 30 min cadence), account allowlist + per-run limits for current ~10k monthly credits, source filtering (`IGN`/`Xbox`/etc.), duplicate protection, and daily retention cleanup job (e.g. purge >30d cached rows)
 - [ ] Batch 6 (`%%%`) Hybrid feed architecture plan (duplicate-aware with current implementation): audit existing `posts`/views/realtime/reactions/comments and decide whether to extend current schema vs introduce a unified `feed_posts` model; prefer extending current schema if it avoids migration churn while still supporting `user + editorial + twitter + reddit` source tagging and game-specific feeds
 - [ ] Batch 7 (`%%%`) Hybrid feed implementation tranche: ship a minimal unified feed query/API and at least one external-source adapter into the existing feed UI without breaking current reactions/comments/following behavior; include source labels/filtering and dedupe keyed by provider/source IDs
@@ -80,6 +78,11 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
 - [x] Open-ended roadmap tranche 3:
   - hardened `public.games` access model (RLS + grants + policies) to support app-side catalog sync safely
   - surfaced follow/unfollow actions on Release Calendar cards (not just release detail)
+- [x] Batch 4 (`%%%`) External social ingestion foundation (`twitterapi.io` -> Supabase Edge Function -> Postgres cache -> SwiftUI)
+  - added `public.tweets_cache` + `public.tweets_cache_feed_view` migration with RLS/grants
+  - added `supabase/functions/syncTweets` Edge Function scaffold with env-secret validation + idempotent upsert path
+  - wired `SocialView` X Pulse client reads to `tweets_cache_feed_view` via `FeedService.fetchCachedTweets(...)` with loading/error/empty states
+  - operational follow-up still required outside sandbox: apply migration, deploy function, run first sync, and validate live cached content
 
 ## Parking Lot
 

@@ -25,56 +25,12 @@ struct SocialView: View {
 
     @State private var selectedGameID: Game.ID?
     @State private var selectedClip: ShortVideo?
+    @State private var cachedTweets: [XPulseTweet] = []
+    @State private var isLoadingCachedTweets = false
+    @State private var cachedTweetsErrorMessage: String?
+    @State private var hasLoadedCachedTweets = false
 
-    private static let xPulseFeed: [XPulseTweet] = {
-        let now = Date()
-        return [
-            XPulseTweet(
-                id: UUID(),
-                authorName: "PlayStation",
-                handle: "PlayStation",
-                body: "Crimson Desert drops March 19, 2026. New combat sequence clip just posted.",
-                createdAt: now.addingTimeInterval(-5_400),
-                relatedGameTitles: ["Crimson Desert"],
-                reposts: 420,
-                likes: 1_900,
-                sourceURL: URL(string: "https://x.com/PlayStation")
-            ),
-            XPulseTweet(
-                id: UUID(),
-                authorName: "Bungie",
-                handle: "Bungie",
-                body: "Marathon launches March 5, 2026. Closed playtests expand next month.",
-                createdAt: now.addingTimeInterval(-8_200),
-                relatedGameTitles: ["Marathon"],
-                reposts: 350,
-                likes: 1_200,
-                sourceURL: URL(string: "https://x.com/Bungie")
-            ),
-            XPulseTweet(
-                id: UUID(),
-                authorName: "Capcom USA",
-                handle: "CapcomUSA_",
-                body: "Pragmata release is locked for April 24, 2026. New trailer soon.",
-                createdAt: now.addingTimeInterval(-11_500),
-                relatedGameTitles: ["Pragmata", "Resident Evil Requiem"],
-                reposts: 280,
-                likes: 940,
-                sourceURL: URL(string: "https://x.com/CapcomUSA_")
-            ),
-            XPulseTweet(
-                id: UUID(),
-                authorName: "Nintendo of America",
-                handle: "NintendoAmerica",
-                body: "Tomodachi Life: Living the Dream arrives April 16, 2026.",
-                createdAt: now.addingTimeInterval(-13_400),
-                relatedGameTitles: ["Tomodachi Life: Living the Dream"],
-                reposts: 510,
-                likes: 2_300,
-                sourceURL: URL(string: "https://x.com/NintendoAmerica")
-            )
-        ]
-    }()
+    private let feedService = FeedService()
 
     private var selectedGame: Game? {
         if let selectedGameID,
@@ -89,8 +45,8 @@ struct SocialView: View {
     }
 
     private var filteredTweets: [XPulseTweet] {
-        guard let selectedGame else { return Self.xPulseFeed }
-        return Self.xPulseFeed.filter { tweet in
+        guard let selectedGame else { return cachedTweets }
+        return cachedTweets.filter { tweet in
             tweet.relatedGameTitles.contains { related in
                 related.caseInsensitiveCompare(selectedGame.title) == .orderedSame
             }
@@ -200,9 +156,38 @@ struct SocialView: View {
                     subtitle: "Publisher and esports tweets pulled into the app for native discussion."
                 )
 
-                if filteredTweets.isEmpty {
+                if isLoadingCachedTweets && !hasLoadedCachedTweets {
                     GlassCard {
-                        Text("No relevant tweets for this game yet.")
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .tint(.white)
+                            Text("Loading synced X posts...")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.78))
+                        }
+                    }
+                } else if let cachedTweetsErrorMessage {
+                    GlassCard {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Couldn’t load X Pulse.")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.white)
+                            Text(cachedTweetsErrorMessage)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.72))
+                            Button {
+                                Task { await loadCachedTweets(force: true) }
+                            } label: {
+                                Text("Retry")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(AppTheme.accentBlue)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } else if filteredTweets.isEmpty {
+                    GlassCard {
+                        Text(hasLoadedCachedTweets ? "No synced tweets for this game yet." : "No synced tweets yet. Run syncTweets to populate the cache.")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.white.opacity(0.78))
                     }
@@ -226,12 +211,74 @@ struct SocialView: View {
             if selectedGameID == nil {
                 selectedGameID = store.socialGames.first?.id
             }
+            if !hasLoadedCachedTweets && !isLoadingCachedTweets {
+                Task { await loadCachedTweets() }
+            }
         }
         .sheet(item: $selectedClip) { clip in
             if let url = clip.videoURL {
                 InAppSafariView(url: url)
                     .ignoresSafeArea()
             }
+        }
+    }
+
+    @MainActor
+    private func loadCachedTweets(force: Bool = false) async {
+        if isLoadingCachedTweets { return }
+        if hasLoadedCachedTweets && !force { return }
+
+        isLoadingCachedTweets = true
+        if force {
+            cachedTweetsErrorMessage = nil
+        }
+
+        defer { isLoadingCachedTweets = false }
+
+        do {
+            let rows = try await feedService.fetchCachedTweets(limit: 50)
+            cachedTweets = rows.map(makeXPulseTweet(from:))
+            cachedTweetsErrorMessage = nil
+            hasLoadedCachedTweets = true
+        } catch {
+            cachedTweetsErrorMessage = error.localizedDescription
+            hasLoadedCachedTweets = true
+            print("Failed to load cached tweets:", error)
+        }
+    }
+
+    private func makeXPulseTweet(from row: FeedService.CachedTweetFeedRow) -> XPulseTweet {
+        let authorHandle = (row.author_handle ?? row.source_handle).trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAuthorName = row.author_name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedHandle = authorHandle.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+        let displayName = (trimmedAuthorName?.isEmpty == false ? trimmedAuthorName : nil) ?? normalizedHandle
+
+        return XPulseTweet(
+            id: row.id,
+            authorName: displayName,
+            handle: normalizedHandle,
+            body: row.body,
+            createdAt: row.published_at,
+            relatedGameTitles: relatedGameTitles(for: row),
+            reposts: row.metrics["repost_count", default: 0],
+            likes: row.metrics["like_count", default: 0],
+            sourceURL: row.canonical_url.flatMap(URL.init(string:))
+        )
+    }
+
+    private func relatedGameTitles(for row: FeedService.CachedTweetFeedRow) -> [String] {
+        let searchable = [
+            row.body,
+            row.author_name ?? "",
+            row.author_handle ?? "",
+            row.source_handle
+        ]
+            .joined(separator: " ")
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+
+        return store.socialGames.compactMap { game in
+            let normalizedTitle = game.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            return searchable.contains(normalizedTitle) ? game.title : nil
         }
     }
 }
