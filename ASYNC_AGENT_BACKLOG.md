@@ -24,7 +24,7 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
 - [x] Batch 10 (`%%%`) Release Calendar UX polish pass (extends existing roadmap item 5): explored/shipped a more exciting month view via a cover-art `Games This Month` spotlight list above the calendar while preserving existing follow/favorite actions and the dense agenda list
 - [x] Batch 11 (`%%%`) Home feed visual polish parity with social feed: added stronger section containers, a pulse summary board, and upgraded news/video card accents while preserving current information density and interactions
 - [ ] Batch 12 (`%%%`) Game detail media carousel quality pass: reduce duplicate images, filter/avoid blurry assets when possible, prefer highest-quality candidates, and add fallback heuristics for weak image sets so the carousel looks curated
-- [ ] Batch 13 (`%%%`) Post content-type badges continuation: audit existing badge work/custom badge assets in progress, unify badge rendering/model, and complete per-post badge display across relevant feed/thread surfaces without regressing layout
+- [ ] Batch 13 (`%%%`) Post content-type badges continuation: badge-system Swift scaffold/docs/tests are committed; next audit/finish in-progress badge work, unify rendering/model, and complete per-post badge display across relevant feed/thread surfaces without regressing layout
 - [ ] Constraint for batches 9-13: work around repeats/partial implementations already in repo, favor incremental improvements over large rewrites, and document what was already present vs newly added
 
 ## In Progress

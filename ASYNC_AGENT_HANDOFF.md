@@ -6,20 +6,28 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: Batch 11 Home feed visual polish parity pass
+- Last milestone: Consolidated missing detached fix + feed badge scaffold groundwork
 
 ## Latest Milestone
 
 ### Summary
 
-- Polished the WIP `HomeView` visual hierarchy to better match the sleeker social/feed surfaces without changing behavior.
-- Added a compact `Daily Pulse Board` summary card (news/clips/following counts + unread notification badge when present).
-- Wrapped the news and vertical video sections in higher-contrast section containers with subtle gradients/borders for stronger separation from the dark background.
-- Upgraded `NewsCard` and `VideoReelCard` visual accents (category dot, footer metadata chip row, clip label overlay) while preserving existing interactions and information density.
+- Cherry-picked the previously detached async fix `c8fe882` into `codex/async-dev`, restoring the Following-feed realtime membership reconciliation improvement (`AppStore` debounced refresh when a followed-game post appears via realtime but is missing from cached `followingPosts`).
+- Committed the in-progress feed badge system scaffold (Batch 13 groundwork): shared badge models/style/view components, test scaffold file, and supporting docs/spec notes.
+- Added Xcode project references/groups for `PatchNotes/Feed/Badges/*` so the badge scaffold compiles with the app target (test scaffold remains unwired until a test target exists).
 
 ### Files Touched
 
-- `PatchNotes/Views/HomeView.swift`
+- `PatchNotes/Model/AppStore.swift`
+- `PatchNotes/Feed/Badges/FeedBadgeModels.swift`
+- `PatchNotes/Feed/Badges/FeedBadgeStyle.swift`
+- `PatchNotes/Feed/Badges/FeedBadgeView.swift`
+- `PatchNotesTests/FeedBadgeSystemTests.swift`
+- `docs/specs/feed-badge-system-automation-brief.md`
+- `docs/specs/feed-badge-system-implementation-spec.md`
+- `docs/specs/feed-badge-system-scaffold-notes.md`
+- `PatchNotes.xcodeproj/project.pbxproj`
+- `ASYNC_AGENT_BACKLOG.md`
 - `ASYNC_AGENT_HANDOFF.md`
 
 ### Migrations Applied
@@ -28,17 +36,19 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 ### Verification
 
-- `HOME=/tmp/codex-home-async CLANG_MODULE_CACHE_PATH=/tmp/codex-clang-module-cache SWIFTPM_MODULECACHE_OVERRIDE=/tmp/codex-swiftpm-cache xcodebuild -scheme PatchNotes -destination 'generic/platform=iOS' -configuration Debug -derivedDataPath /tmp/codex-derived-data build` failed in sandbox:
-  - CoreSimulator service connection unavailable (sandbox environment)
-  - SwiftPM dependency resolution blocked by network/DNS restriction (`Could not resolve host: github.com`)
-- Static review of `HomeView.swift` changes completed (no syntax issues found in the edited regions).
+- Consolidation/cherry-pick verification:
+  - confirmed detached commit `c8fe882` was not in `codex/async-dev`
+  - cherry-picked onto branch as `31c5f67` (handoff conflict resolved by keeping current handoff file)
+- Badge scaffold verification:
+  - static review of new badge scaffold files + project file additions (coherent file references/build phase wiring for app target)
+  - full `xcodebuild` still expected to be sandbox-blocked here due CoreSimulator + SwiftPM network/DNS restrictions (`github.com`)
 
 ### Open Risks / Notes
 
-- The new `Daily Pulse Board` stat pills are intentionally compact; confirm text fit on smaller devices / larger text settings in a full simulator run.
-- This pass avoids the in-progress local feed badge scaffold (`PatchNotes/Feed/`, `PatchNotesTests/`, `docs/`) to prevent conflicts.
+- Feed badge scaffold is groundwork only (not yet integrated into feed rows/detail surfaces, and test scaffold is not wired to a test target).
+- Full branch validation still requires a real Xcode/Supabase-capable environment due sandbox limits.
 - Upstream async work also completed Batch 6 hybrid feed architecture planning; Batch 7 implementation can now follow the documented plan.
 
 ## Next Recommended Action
 
-- Implement Batch 7 using `HYBRID_FEED_ARCHITECTURE_PLAN.md` (source metadata + projection into `posts` + feed labels), or take Batch 12 as a UI-only fallback if backend/Supabase work is blocked in the current environment.
+- Run a full local build/test pass on `codex/async-dev` after this consolidation (including badge scaffold compile sanity), then continue Batch 7 implementation or Batch 12 UI polish depending on environment readiness.

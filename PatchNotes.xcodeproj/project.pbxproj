@@ -28,6 +28,9 @@
 		A00000000000000000000046 /* ProfileOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* ProfileOnboardingView.swift */; };
 		A00000000000000000000047 /* PublicProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* PublicProfile.swift */; };
 		A00000000000000000000048 /* PublicProfileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* PublicProfileService.swift */; };
+		A00000000000000000000049 /* FeedBadgeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* FeedBadgeModels.swift */; };
+		A0000000000000000000004A /* FeedBadgeStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000027 /* FeedBadgeStyle.swift */; };
+		A0000000000000000000004B /* FeedBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000028 /* FeedBadgeView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +55,9 @@
 		A00000000000000000000023 /* ProfileOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileOnboardingView.swift; sourceTree = "<group>"; };
 		A00000000000000000000024 /* PublicProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicProfile.swift; sourceTree = "<group>"; };
 		A00000000000000000000025 /* PublicProfileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicProfileService.swift; sourceTree = "<group>"; };
+		A00000000000000000000026 /* FeedBadgeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedBadgeModels.swift; sourceTree = "<group>"; };
+		A00000000000000000000027 /* FeedBadgeStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedBadgeStyle.swift; sourceTree = "<group>"; };
+		A00000000000000000000028 /* FeedBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedBadgeView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,6 +98,7 @@
 				A00000000000000000000021 /* AuthManager.swift */,
 				A0000000000000000000001E /* FeedService.swift */,
 				A00000000000000000000025 /* PublicProfileService.swift */,
+				A00000000000000000000007 /* Feed */,
 				A00000000000000000000005 /* Views */,
 				A00000000000000000000006 /* Model */,
 				A0000000000000000000001B /* Assets.xcassets */,
@@ -123,6 +130,24 @@
 				A00000000000000000000024 /* PublicProfile.swift */,
 			);
 			path = Model;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000007 /* Feed */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000008 /* Badges */,
+			);
+			path = Feed;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000008 /* Badges */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000026 /* FeedBadgeModels.swift */,
+				A00000000000000000000027 /* FeedBadgeStyle.swift */,
+				A00000000000000000000028 /* FeedBadgeView.swift */,
+			);
+			path = Badges;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -219,6 +244,9 @@
 				A00000000000000000000046 /* ProfileOnboardingView.swift in Sources */,
 				A00000000000000000000047 /* PublicProfile.swift in Sources */,
 				A00000000000000000000048 /* PublicProfileService.swift in Sources */,
+				A00000000000000000000049 /* FeedBadgeModels.swift in Sources */,
+				A0000000000000000000004A /* FeedBadgeStyle.swift in Sources */,
+				A0000000000000000000004B /* FeedBadgeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
