@@ -615,3 +615,132 @@ struct TagChip: View {
             .background(Color.white.opacity(0.12), in: Capsule())
     }
 }
+
+struct TeamLogoBadge: View {
+    let team: String
+    var size: CGFloat = 20
+
+    private static let logoURLs: [String: URL] = [
+        "Sentinels":     URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2e/Sentinels_logo.svg/200px-Sentinels_logo.svg.png")!,
+        "Paper Rex":     URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Paper_Rex_logo.svg/200px-Paper_Rex_logo.svg.png")!,
+        "T1":            URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/T1_esports_logo.svg/200px-T1_esports_logo.svg.png")!,
+        "G2":            URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/1/12/Esports_organization_G2_Esports_logo.svg/200px-Esports_organization_G2_Esports_logo.svg.png")!,
+        "Gen.G":         URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/77/Gen.G_Logo.svg/200px-Gen.G_Logo.svg.png")!,
+        "Liquid":        URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f1/Team_Liquid_logo.svg/200px-Team_Liquid_logo.svg.png")!,
+        "FaZe":          URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Faze_Clan.svg/200px-Faze_Clan.svg.png")!,
+        "Fnatic":        URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/4/43/Esports_organization_Fnatic_logo.svg/200px-Esports_organization_Fnatic_logo.svg.png")!,
+        "NRG":           URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/NRG_Esports_logo.svg/200px-NRG_Esports_logo.svg.png")!,
+        "100 Thieves":   URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/16/100_Thieves_logo.svg/200px-100_Thieves_logo.svg.png")!,
+        "Loud":          URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9f/LOUD_logo.svg/200px-LOUD_logo.svg.png")!,
+        "Evil Geniuses": URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/54/Evil_Geniuses_Logo.svg/200px-Evil_Geniuses_Logo.svg.png")!,
+        "Cloud9":        URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f7/Cloud9_logo_c._2023.svg/200px-Cloud9_logo_c._2023.svg.png")!,
+        "TSM":           URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c7/TSM_Logo.svg/200px-TSM_Logo.svg.png")!,
+        "DRX":           URL(string: "https://upload.wikimedia.org/wikipedia/commons/3/34/DRX_logo_2023.png")!,
+        "KT Rolster":    URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f6/KT_Logo.svg/200px-KT_Logo.svg.png")!,
+        "Team Spirit":   URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Team_Spirit_new_em.svg/200px-Team_Spirit_new_em.svg.png")!,
+        "Spirit":        URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Team_Spirit_new_em.svg/200px-Team_Spirit_new_em.svg.png")!,
+        "MOUZ":          URL(string: "https://upload.wikimedia.org/wikipedia/commons/3/39/MOUZlogo2021.png")!,
+        "Heroic":        URL(string: "https://upload.wikimedia.org/wikipedia/commons/8/8f/Heroic_2023_logo.png")!,
+        "Virtus.pro":    URL(string: "https://upload.wikimedia.org/wikipedia/en/3/3b/Virtus_pro_logo_new.png")!,
+        "Vitality":      URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/4/49/Team_Vitality_logo.svg/200px-Team_Vitality_logo.svg.png")!,
+        "BetBoom":       URL(string: "https://upload.wikimedia.org/wikipedia/commons/2/24/BetBoom_Team.png")!,
+        "Falcons":       URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/4/4d/Team_Falcons_Logo.svg/200px-Team_Falcons_Logo.svg.png")!,
+        "Team Secret":   URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/2/2a/Team_Secret_logo.svg/200px-Team_Secret_logo.svg.png")!,
+        "OG":            URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/5/5c/OG_Esports_logo.svg/200px-OG_Esports_logo.svg.png")!,
+    ]
+
+    private var logoURL: URL? { Self.logoURLs[team] }
+
+    private var initials: String {
+        let letters = team.split(separator: " ").prefix(2).compactMap { $0.first.map(String.init) }.joined()
+        return letters.isEmpty ? "T" : letters
+    }
+
+    private var colors: [Color] {
+        switch team {
+        case "Sentinels":
+            return [Color(red: 0.84, green: 0.20, blue: 0.28), Color(red: 0.40, green: 0.07, blue: 0.09)]
+        case "Paper Rex":
+            return [Color(red: 0.10, green: 0.64, blue: 0.95), Color(red: 0.08, green: 0.30, blue: 0.68)]
+        case "T1", "G2":
+            return [Color(red: 0.95, green: 0.15, blue: 0.15), Color(red: 0.50, green: 0.04, blue: 0.04)]
+        case "Gen.G", "Liquid":
+            return [Color(red: 0.24, green: 0.55, blue: 0.96), Color(red: 0.10, green: 0.20, blue: 0.55)]
+        case "FaZe", "Fnatic":
+            return [Color(red: 0.98, green: 0.57, blue: 0.14), Color(red: 0.61, green: 0.30, blue: 0.04)]
+        default:
+            return [AppTheme.accentBlue, AppTheme.accent]
+        }
+    }
+
+    private var gradientBadge: some View {
+        Circle()
+            .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: size, height: size)
+            .overlay {
+                Text(initials)
+                    .font(.system(size: size * 0.40, weight: .black))
+                    .foregroundStyle(.white)
+            }
+            .overlay {
+                Circle()
+                    .stroke(Color.white.opacity(0.24), lineWidth: 1)
+            }
+    }
+
+    var body: some View {
+        if let url = logoURL {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .padding(size * 0.10)
+                        .background(Color.white.opacity(0.10), in: Circle())
+                        .overlay {
+                            Circle().stroke(Color.white.opacity(0.24), lineWidth: 1)
+                        }
+                case .empty, .failure:
+                    gradientBadge
+                @unknown default:
+                    gradientBadge
+                }
+            }
+            .frame(width: size, height: size)
+        } else {
+            gradientBadge
+        }
+    }
+}
+
+struct LivePulseDot: View {
+    @State private var pulsing = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.red.opacity(0.35))
+                .frame(width: 12, height: 12)
+                .scaleEffect(pulsing ? 1.8 : 1)
+                .opacity(pulsing ? 0 : 0.8)
+            Circle()
+                .fill(Color.red)
+                .frame(width: 6, height: 6)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 1.2).repeatForever(autoreverses: false)) {
+                pulsing = true
+            }
+        }
+    }
+}
+
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .opacity(configuration.isPressed ? 0.80 : 1)
+            .animation(.spring(duration: 0.2), value: configuration.isPressed)
+    }
+}

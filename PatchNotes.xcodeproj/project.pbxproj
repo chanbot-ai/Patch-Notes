@@ -28,6 +28,7 @@
 		A00000000000000000000046 /* ProfileOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* ProfileOnboardingView.swift */; };
 		A00000000000000000000047 /* PublicProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* PublicProfile.swift */; };
 		A00000000000000000000048 /* PublicProfileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* PublicProfileService.swift */; };
+		A00000000000000000000049 /* MatchDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* MatchDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +53,7 @@
 		A00000000000000000000023 /* ProfileOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileOnboardingView.swift; sourceTree = "<group>"; };
 		A00000000000000000000024 /* PublicProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicProfile.swift; sourceTree = "<group>"; };
 		A00000000000000000000025 /* PublicProfileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicProfileService.swift; sourceTree = "<group>"; };
+		A00000000000000000000026 /* MatchDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -110,6 +112,7 @@
 				A00000000000000000000016 /* SocialView.swift */,
 				A00000000000000000000017 /* MyGamesView.swift */,
 				A00000000000000000000018 /* EsportsView.swift */,
+				A00000000000000000000026 /* MatchDetailView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -219,6 +222,7 @@
 				A00000000000000000000046 /* ProfileOnboardingView.swift in Sources */,
 				A00000000000000000000047 /* PublicProfile.swift in Sources */,
 				A00000000000000000000048 /* PublicProfileService.swift in Sources */,
+				A00000000000000000000049 /* MatchDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
