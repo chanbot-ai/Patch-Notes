@@ -8,9 +8,84 @@ struct MyGamesView: View {
         GridItem(.flexible(), spacing: 14, alignment: .top)
     ]
 
+    private var followedGames: [Game] {
+        store.followedGameIDs
+            .compactMap { store.game(for: $0) }
+            .sorted { lhs, rhs in
+                if lhs.releaseDate != rhs.releaseDate {
+                    return lhs.releaseDate < rhs.releaseDate
+                }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+    }
+
+    private var unresolvedFollowedGameCount: Int {
+        max(store.followedGameIDs.count - followedGames.count, 0)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionHeader(
+                        title: "Following Feed Sources",
+                        subtitle: "These games power your Following tab in the social feed."
+                    )
+
+                    GlassCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                MetricPill(icon: "dot.radiowaves.left.and.right", text: "\(store.followedGameIDs.count) followed")
+                                if store.followedGamesIsLoading {
+                                    ProgressView()
+                                        .scaleEffect(0.85)
+                                        .tint(.white.opacity(0.9))
+                                }
+                            }
+
+                            if let errorMessage = store.followedGamesErrorMessage {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Couldn’t refresh followed games.")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.red.opacity(0.95))
+                                    Text(errorMessage)
+                                        .font(.caption)
+                                        .foregroundStyle(.white.opacity(0.72))
+                                        .textSelection(.enabled)
+                                    Button("Retry") {
+                                        store.loadFollowedGames()
+                                    }
+                                    .buttonStyle(.plain)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AppTheme.accent)
+                                }
+                            } else if followedGames.isEmpty {
+                                Text(store.followedGamesIsLoading ? "Loading followed games..." : "Follow games in Release Calendar to personalize your Following feed.")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.78))
+                            } else {
+                                VStack(spacing: 10) {
+                                    ForEach(followedGames) { game in
+                                        NavigationLink {
+                                            GameReleaseDetailView(game: game)
+                                        } label: {
+                                            FavoritedGameRow(game: game)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Open followed game \(game.title)")
+                                    }
+                                }
+                            }
+
+                            if unresolvedFollowedGameCount > 0 {
+                                Text("\(unresolvedFollowedGameCount) followed \(unresolvedFollowedGameCount == 1 ? "game is" : "games are") not in the local catalog yet and will appear after feed/calendar sync.")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.62))
+                            }
+                        }
+                    }
+                }
+
                 VStack(alignment: .leading, spacing: 12) {
                     SectionHeader(
                         title: "Your Library",
@@ -69,6 +144,11 @@ struct MyGamesView: View {
         }
         .navigationTitle("My Games")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if store.followedGameIDs.isEmpty && !store.followedGamesIsLoading && store.followedGamesErrorMessage == nil {
+                store.loadFollowedGames()
+            }
+        }
     }
 }
 
