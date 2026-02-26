@@ -6,7 +6,7 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 
 - Branch: `codex/async-dev`
 - Mode: Async development active
-- Last milestone: syncTweets provider key fixed; dry/live sync verified with `tweets_cache` writes
+- Last milestone: scheduled sync path fixed (allowlist env) and verified via cron SQL path
 
 ## Latest Milestone
 
@@ -18,6 +18,8 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 - Confirmed the hosted `TWITTERAPI_IO_API_KEY` secret digest did not match the locally validated token, then overwrote the hosted Edge Function secret with the exact working token and redeployed `syncTweets`.
 - Re-ran authenticated `syncTweets` dry-run and live test calls successfully for `@ign`; dry-run reported `wouldUpsert: 3`, and a delayed live retry (after the provider's free-tier QPS cooldown) returned `upserted: 3`.
 - Verified `public.tweets_cache` now contains rows (`ign`: 3 rows) and recent `sync_tweets_cache_30m` cron jobs continue to execute.
+- Investigated the scheduling path itself and found the cron job body (`{"dryRun": false}`) was still failing with `No handles provided` because `TWITTER_SYNC_ALLOWED_HANDLES` was not configured for default cron runs.
+- Set hosted Edge Function secret `TWITTER_SYNC_ALLOWED_HANDLES=ign`, redeployed `syncTweets`, then manually executed the same `net.http_post(...)` SQL path used by the cron job. `tweets_cache` grew from `3` to `20` rows and `latest_synced_at` advanced, confirming scheduled invocations now have a valid default handle set.
 
 ### Files Touched
 
@@ -44,6 +46,9 @@ This file is updated by Codex during asynchronous work sessions so changes are e
 - Remote secrets audit (`scripts/supabase-cli.sh secrets list --project-ref <ref>`):
   - confirmed `TWITTERAPI_IO_API_KEY` is present on the project
   - compared secret digest with the locally tested token digest and found a mismatch, then updated the hosted secret to match
+- Additional scheduling env audit:
+  - `TWITTER_SYNC_ALLOWED_HANDLES` was initially absent (cron path returned `No handles provided`)
+  - added `TWITTER_SYNC_ALLOWED_HANDLES=ign` and redeployed `syncTweets`
 - Edge Function probes (network-enabled `curl` with valid anon auth headers):
   - dry-run succeeded (`ok: true`, `wouldUpsert: 3`) for `handles: [\"ign\"]`
   - immediate live retry hit twitterapi.io free-tier QPS guard (`429 Too Many Requests`, one request every 5 seconds)
@@ -52,14 +57,21 @@ This file is updated by Codex during asynchronous work sessions so changes are e
   - `public.tweets_cache` row count is now `3` (`source_handle = ign`)
   - latest `synced_at` observed: `2026-02-26 18:35:37.402+00`
   - `cron.job_run_details` shows `sync_tweets_cache_30m` jobs executing successfully at `17:00`, `17:30`, `18:00`, and `18:30` UTC (cron invocation path active)
+- Manual cron-SQL-path verification (`select net.http_post(...)` using the same auth/body shape as cron job):
+  - before: `tweets_cache_rows=3`, `latest_synced_at=2026-02-26 18:35:37.402+00`
+  - first post-allowlist request stored in `net._http_response` as `400` with `No handles provided` (pre-fix evidence, request `id=5`)
+  - post-fix request (`id=6`) shows `net._http_response` timeout at 5000ms, but `tweets_cache` still updated to `20` rows and `latest_synced_at=2026-02-26 18:48:59.71+00`
+  - this indicates the async Edge Function request can complete and write cache rows even when `net._http_response` records a timeout on the HTTP response wait
 
 ### Open Risks / Notes
 
 - `syncTweets` is now working end-to-end for manual authenticated test calls and writes to `tweets_cache`.
 - twitterapi.io free-tier limit is strict (QPS 1 request / 5 seconds), so back-to-back manual test calls can return `429` even when the key is valid.
+- Scheduled/default cron runs now require `TWITTER_SYNC_ALLOWED_HANDLES` (or the cron body must pass `handles`); this is now minimally configured as `ign` for validation.
+- `net.http_post` default response wait can time out at 5000ms while the downstream function still completes successfully; treat `net._http_response` timeout entries as a signal to inspect cache writes rather than immediate sync failure.
 - Manual cron scheduling embeds the anon key in the cron job command text as a stopgap because `app.settings.*` writes are blocked from this connection. Prefer replacing with the migration-driven `app.settings` path once admin-level config is available.
 - Need to observe a post-fix scheduled cron execution that results in cache writes (the cron job rows show execution success, but we have not yet correlated a scheduled run after the corrected provider key with inserted rows).
 
 ## Next Recommended Action
 
-- Let the next scheduled `sync_tweets_cache_30m` run execute (or trigger one manually after waiting >5s), then verify `tweets_cache` growth and, if desired, tune cron cadence/testing approach to avoid free-tier QPS collisions during manual validation.
+- Expand `TWITTER_SYNC_ALLOWED_HANDLES` from the temporary `ign` validation value to the desired source list (`ign,xbox,...`), then observe the next scheduled `sync_tweets_cache_30m` run and verify `tweets_cache` growth / `latest_synced_at` advancement.
