@@ -20,6 +20,12 @@ Use this file to queue tasks for asynchronous Codex work on `codex/async-dev`.
 - [ ] Batch 7 (`%%%`) Hybrid feed implementation tranche: ship a minimal unified feed query/API and at least one external-source adapter into the existing feed UI without breaking current reactions/comments/following behavior; include source labels/filtering and dedupe keyed by provider/source IDs
 - [ ] Batch 8 (`%%%`) Realtime + optimistic feed polish (fill gaps only): audit current `AppStore` subscriptions and add any missing live feed insert updates / optimistic post reconciliation for Sleeper-style responsiveness, while preventing duplicate event application and race-condition regressions
 - [ ] Constraint for batches 4-8: optimize for cache+cron (not user-triggered provider fetch fan-out), keep provider credentials in Supabase secrets only, and do not commit API keys/tokens to the repo
+- [ ] Batch 9 (`%%%`) Notifications auth/session reliability hotfix: investigate home-feed notifications load failure (`JWT expired` / `sub` warning), ensure session refresh/re-auth path runs before notifications queries/subscriptions, add graceful retry UX, and prevent noisy repeated failure states
+- [ ] Batch 10 (`%%%`) Release Calendar UX polish pass (extends existing roadmap item 5): explore a more exciting month view with release cover art markers on day cells and/or a “games this month” list above the calendar; preserve performance, tap accuracy, and existing follow/watch actions
+- [ ] Batch 11 (`%%%`) Home feed visual polish parity with social feed: port the sleeker card/container treatment (contrast vs black backdrop, thread container styling, gradients/borders where appropriate) to the WIP home feed while preserving current information density and interaction behavior
+- [ ] Batch 12 (`%%%`) Game detail media carousel quality pass: reduce duplicate images, filter/avoid blurry assets when possible, prefer highest-quality candidates, and add fallback heuristics for weak image sets so the carousel looks curated
+- [ ] Batch 13 (`%%%`) Post content-type badges continuation: audit existing badge work/custom badge assets in progress, unify badge rendering/model, and complete per-post badge display across relevant feed/thread surfaces without regressing layout
+- [ ] Constraint for batches 9-13: work around repeats/partial implementations already in repo, favor incremental improvements over large rewrites, and document what was already present vs newly added
 
 ## In Progress
 
