@@ -246,22 +246,36 @@ final class FeedService {
         onNotificationsChange = nil
     }
 
-    func fetchHotFeed() async throws -> [Post] {
+    private struct FeedPageParams: Encodable {
+        let p_cursor_score: Double?
+        let p_cursor_created_at: String?
+        let p_cursor_id: String?
+        let p_limit: Int
+
+        init(cursor: FeedCursor?, limit: Int) {
+            self.p_cursor_score = cursor?.hotScore
+            self.p_cursor_created_at = cursor.map {
+                FeedService.postgresTimestampWithFractionalSeconds.string(from: $0.createdAt)
+            }
+            self.p_cursor_id = cursor?.id.uuidString
+            self.p_limit = limit
+        }
+    }
+
+    func fetchHotFeed(cursor: FeedCursor? = nil, limit: Int = 25) async throws -> [Post] {
+        let params = FeedPageParams(cursor: cursor, limit: limit)
         let response = try await client
-            .from("hot_feed_view")
-            .select()
-            .limit(50)
+            .rpc("fetch_hot_feed_page", params: params)
             .execute()
 
         return try makeDatabaseDecoder().decode([Post].self, from: response.data)
     }
 
-    func fetchFollowingFeed(accessToken: String) async throws -> [Post] {
+    func fetchFollowingFeed(accessToken: String, cursor: FeedCursor? = nil, limit: Int = 25) async throws -> [Post] {
         let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        let params = FeedPageParams(cursor: cursor, limit: limit)
         let response = try await client
-            .from("following_feed_view")
-            .select()
-            .limit(50)
+            .rpc("fetch_following_feed_page", params: params)
             .execute()
 
         return try makeDatabaseDecoder().decode([Post].self, from: response.data)

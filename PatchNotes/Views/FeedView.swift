@@ -124,6 +124,20 @@ struct FeedView: View {
         }
     }
 
+    private var activeFeedHasMore: Bool {
+        switch feedScope {
+        case .hot: return store.hotFeedHasMore
+        case .following: return store.followingFeedHasMore
+        }
+    }
+
+    private var activeFeedIsLoadingMore: Bool {
+        switch feedScope {
+        case .hot: return store.hotFeedIsLoadingMore
+        case .following: return store.followingFeedIsLoadingMore
+        }
+    }
+
     var body: some View {
         List {
             Section {
@@ -219,6 +233,22 @@ struct FeedView: View {
                     .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+                    .onAppear {
+                        if shouldLoadMore(for: post) {
+                            loadMoreForActiveScope()
+                        }
+                    }
+            }
+
+            if activeFeedIsLoadingMore {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                        .padding(.vertical, 16)
+                    Spacer()
+                }
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             }
         }
         .listStyle(.plain)
@@ -310,6 +340,20 @@ struct FeedView: View {
             if feedScope == .following, store.followingPosts.isEmpty, !store.followingFeedIsLoading {
                 store.loadFollowingFeed()
             }
+        }
+    }
+
+    private func shouldLoadMore(for post: Post) -> Bool {
+        guard activeFeedHasMore, !activeFeedIsLoadingMore else { return false }
+        let posts = activePosts
+        guard posts.count >= 5 else { return false }
+        return post.id == posts[posts.count - 5].id
+    }
+
+    private func loadMoreForActiveScope() {
+        switch feedScope {
+        case .hot: store.loadMoreHotFeed()
+        case .following: store.loadMoreFollowingFeed()
         }
     }
 
