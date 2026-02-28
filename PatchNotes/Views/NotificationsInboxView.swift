@@ -46,18 +46,6 @@ struct NotificationsInboxView: View {
                 .listRowSeparator(.hidden)
             }
 
-            if !store.notificationsIsLoading && store.notifications.isEmpty && store.notificationsErrorMessage == nil {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("No notifications yet")
-                        .font(.headline)
-                    Text("Comments and replies on your posts will show up here.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            }
-
             if !store.notificationsIsLoading && store.notificationsErrorMessage == nil {
                 if filteredNotifications.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {

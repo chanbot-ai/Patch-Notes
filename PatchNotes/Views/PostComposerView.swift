@@ -1,5 +1,4 @@
 import SwiftUI
-import Supabase
 
 private enum ComposerMediaKind: String {
     case image
@@ -27,7 +26,7 @@ struct PostComposerView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
 
-    private let service = PostComposerService()
+    private let feedService = FeedService()
 
     var body: some View {
         Form {
@@ -158,17 +157,31 @@ struct PostComposerView: View {
             defer { isSaving = false }
 
             do {
-                try await service.createPost(
-                    session: session,
-                    linkedGame: availableGames.first(where: { $0.id == selectedGameID }),
+                let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !accessToken.isEmpty else {
+                    errorMessage = "Your session is missing an access token. Please sign out and sign in again."
+                    return
+                }
+
+                let linkedGame = availableGames.first(where: { $0.id == selectedGameID })
+                if let linkedGame {
+                    try await feedService.ensureGameExists(linkedGame, accessToken: accessToken)
+                }
+
+                try await feedService.createPost(
+                    authorID: session.user.id,
+                    gameID: linkedGame?.id,
+                    type: mediaAttachment?.kind.rawValue ?? "text",
                     title: trimmedTitle.isEmpty ? nil : trimmedTitle,
                     body: trimmedBody.isEmpty ? nil : trimmedBody,
-                    mediaAttachment: mediaAttachment
+                    mediaURL: mediaAttachment?.url.absoluteString,
+                    thumbnailURL: mediaAttachment?.thumbnailURL?.absoluteString,
+                    accessToken: accessToken
                 )
                 onPostCreated()
                 dismiss()
             } catch {
-                errorMessage = service.friendlyMessage(for: error)
+                errorMessage = Self.friendlyPostCreationMessage(for: error)
             }
         }
     }
@@ -248,63 +261,10 @@ private struct ComposerMediaPreview: View {
     }
 }
 
-private struct PostComposerService {
-    private struct NewPostInsert: Encodable {
-        let author_id: UUID
-        let game_id: UUID?
-        let type: String
-        let title: String?
-        let body: String?
-        let media_url: String?
-        let thumbnail_url: String?
-        let is_system_generated: Bool
-    }
+// MARK: - Error Formatting
 
-    private let feedService = FeedService()
-
-    func createPost(
-        session: Session,
-        linkedGame: Game?,
-        title: String?,
-        body: String?,
-        mediaAttachment: ComposerMediaAttachment?
-    ) async throws {
-        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !accessToken.isEmpty else {
-            throw NSError(
-                domain: "PatchNotes.PostComposer",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Your session is missing an access token. Please sign out and sign in again."]
-            )
-        }
-
-        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
-        if let linkedGame {
-            try await feedService.ensureGameExists(linkedGame, accessToken: accessToken)
-        }
-
-        let resolvedMediaURL = mediaAttachment?.url.absoluteString
-        let resolvedThumbnailURL = mediaAttachment?.thumbnailURL?.absoluteString
-        let resolvedType = mediaAttachment?.kind.rawValue ?? "text"
-
-        try await client
-            .from("posts")
-            .insert(
-                NewPostInsert(
-                    author_id: session.user.id,
-                    game_id: linkedGame?.id,
-                    type: resolvedType,
-                    title: title,
-                    body: body,
-                    media_url: resolvedMediaURL,
-                    thumbnail_url: resolvedThumbnailURL,
-                    is_system_generated: false
-                )
-            )
-            .execute()
-    }
-
-    func friendlyMessage(for error: Error) -> String {
+extension PostComposerView {
+    fileprivate static func friendlyPostCreationMessage(for error: Error) -> String {
         let message = [error.localizedDescription, String(describing: error)]
             .joined(separator: " | ")
             .lowercased()

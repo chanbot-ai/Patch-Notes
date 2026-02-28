@@ -74,6 +74,17 @@ final class FeedService {
         let genre: String?
     }
 
+    private struct NewPostInsert: Encodable {
+        let author_id: UUID
+        let game_id: UUID?
+        let type: String
+        let title: String?
+        let body: String?
+        let media_url: String?
+        let thumbnail_url: String?
+        let is_system_generated: Bool
+    }
+
     private struct NotificationReadUpdatePayload: Encodable {
         let read: Bool
     }
@@ -334,6 +345,34 @@ final class FeedService {
             }
             throw error
         }
+    }
+
+    func createPost(
+        authorID: UUID,
+        gameID: UUID?,
+        type: String,
+        title: String?,
+        body: String?,
+        mediaURL: String?,
+        thumbnailURL: String?,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await client
+            .from("posts")
+            .insert(
+                NewPostInsert(
+                    author_id: authorID,
+                    game_id: gameID,
+                    type: type,
+                    title: title,
+                    body: body,
+                    media_url: mediaURL,
+                    thumbnail_url: thumbnailURL,
+                    is_system_generated: false
+                )
+            )
+            .execute()
     }
 
     func fetchGameCatalog(ids: [UUID]) async throws -> [Game] {
