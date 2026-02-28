@@ -67,8 +67,10 @@ final class AppStore: ObservableObject {
     private var hasSubscribedToCommentMetrics = false
     private var hasSubscribedToNotifications = false
     private var commentOffsetsByPost: [UUID: Int]
+    private var commentCacheAccessOrder: [UUID] = []
     private let commentPageSize = 20
     private let maxCachedCommentsPerPost = 100
+    private let maxCachedCommentPosts = 30
     private var inFlightPostRefreshIDs: Set<UUID>
     private var inFlightPostReactionKeys: Set<String>
     private var inFlightCommentReactionKeys: Set<String>
@@ -361,6 +363,7 @@ final class AppStore: ObservableObject {
             commentHasMoreByPost = [:]
             commentSortByPost = [:]
             commentOffsetsByPost = [:]
+            commentCacheAccessOrder = []
             reactionErrorMessage = nil
             followingPosts = []
             followingFeedErrorMessage = nil
@@ -429,6 +432,7 @@ final class AppStore: ObservableObject {
     }
 
     func ensureCommentsLoaded(for postId: UUID) {
+        touchCommentCache(for: postId)
         if commentsByPost[postId] == nil {
             loadInitialComments(for: postId)
         }
@@ -944,6 +948,7 @@ final class AppStore: ObservableObject {
                         commentSortByPost = nextCommentSort
                     }
                     commentOffsetsByPost.removeValue(forKey: postId)
+                    commentCacheAccessOrder.removeAll { $0 == postId }
                     if !removedCommentIDs.isEmpty {
                         var nextCommentReactionCounts = commentReactionCountsByComment
                         var nextViewerCommentReactions = viewerCommentReactionTypeIDsByComment
@@ -1519,6 +1524,50 @@ final class AppStore: ObservableObject {
             commentHasMoreByPost = latestHasMore
 
             print("Failed to load comments:", error)
+        }
+    }
+
+    private func touchCommentCache(for postId: UUID) {
+        commentCacheAccessOrder.removeAll { $0 == postId }
+        commentCacheAccessOrder.append(postId)
+        while commentCacheAccessOrder.count > maxCachedCommentPosts {
+            let evictId = commentCacheAccessOrder.removeFirst()
+            evictCommentCache(for: evictId)
+        }
+    }
+
+    private func evictCommentCache(for postId: UUID) {
+        let commentIDs = (commentsByPost[postId] ?? []).map(\.id)
+
+        var nextComments = commentsByPost
+        nextComments.removeValue(forKey: postId)
+        commentsByPost = nextComments
+
+        commentIsLoadingByPost.remove(postId)
+
+        var nextErrors = commentLoadErrorByPost
+        nextErrors.removeValue(forKey: postId)
+        commentLoadErrorByPost = nextErrors
+
+        var nextHasMore = commentHasMoreByPost
+        nextHasMore.removeValue(forKey: postId)
+        commentHasMoreByPost = nextHasMore
+
+        var nextSort = commentSortByPost
+        nextSort.removeValue(forKey: postId)
+        commentSortByPost = nextSort
+
+        commentOffsetsByPost.removeValue(forKey: postId)
+
+        if !commentIDs.isEmpty {
+            var nextReactionCounts = commentReactionCountsByComment
+            var nextViewerReactions = viewerCommentReactionTypeIDsByComment
+            for id in commentIDs {
+                nextReactionCounts.removeValue(forKey: id)
+                nextViewerReactions.removeValue(forKey: id)
+            }
+            commentReactionCountsByComment = nextReactionCounts
+            viewerCommentReactionTypeIDsByComment = nextViewerReactions
         }
     }
 
