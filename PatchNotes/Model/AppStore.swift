@@ -1858,6 +1858,40 @@ final class AppStore: ObservableObject {
     }
 }
 
+// MARK: - Preview Support
+
+#if DEBUG
+struct AppPreviewState {
+    var posts: [Post] = []
+    var followingPosts: [Post] = []
+    var reactionTypes: [ReactionType] = []
+    var reactionCountsByPost: [UUID: [PostReactionCount]] = [:]
+    var reactionTotalsByPost: [UUID: Int] = [:]
+    var notifications: [AppNotification] = []
+    var notificationActorProfilesByID: [UUID: PublicProfile] = [:]
+    var publicProfilesByID: [UUID: PublicProfile] = [:]
+    var commentsByPost: [UUID: [Comment]] = [:]
+    var feedIsLoading: Bool = false
+    var notificationsIsLoading: Bool = false
+}
+
+extension AppStore {
+    func seedPreviewState(_ state: AppPreviewState) {
+        posts = state.posts
+        followingPosts = state.followingPosts
+        reactionTypes = state.reactionTypes
+        reactionCountsByPost = state.reactionCountsByPost
+        reactionTotalsByPost = state.reactionTotalsByPost
+        notifications = state.notifications
+        notificationActorProfilesByID = state.notificationActorProfilesByID
+        publicProfilesByID = state.publicProfilesByID
+        commentsByPost = state.commentsByPost
+        feedIsLoading = state.feedIsLoading
+        notificationsIsLoading = state.notificationsIsLoading
+    }
+}
+#endif
+
 struct AppSeedData {
     let ownedGames: [Game]
     let upcomingReleases: [Game]

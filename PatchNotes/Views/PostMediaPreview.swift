@@ -271,3 +271,25 @@ struct ExternalLinkPreviewCard: View {
         .buttonStyle(.plain)
     }
 }
+
+// MARK: - Previews
+
+#if DEBUG
+#Preview("PostMediaPreview - Image") {
+    PostMediaPreview(post: PreviewHelpers.makeImagePost(), height: 190)
+        .padding()
+        .preferredColorScheme(.dark)
+}
+
+#Preview("PostMediaPreview - Video") {
+    PostMediaPreview(post: PreviewHelpers.makeVideoPost(), height: 190)
+        .padding()
+        .preferredColorScheme(.dark)
+}
+
+#Preview("PostMediaPreview - Link") {
+    PostMediaPreview(post: PreviewHelpers.makeLinkPost(), height: 190)
+        .padding()
+        .preferredColorScheme(.dark)
+}
+#endif

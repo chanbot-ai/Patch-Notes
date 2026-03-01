@@ -351,3 +351,72 @@ struct PostSourceMetaRow: View {
         }
     }
 }
+
+// MARK: - Previews
+
+#if DEBUG
+#Preview("FeedPostRow - Text") {
+    let post = PreviewHelpers.makePost()
+    let reactions = PreviewHelpers.makeReactionTypes()
+    let counts = PreviewHelpers.makeReactionCounts(postID: post.id)
+    return ScrollView {
+        FeedPostRow(
+            post: post,
+            authorProfile: PreviewHelpers.makeProfile(),
+            linkedGame: PreviewHelpers.makeGame(),
+            badgeGame: nil,
+            reactionCountOverride: 12,
+            reactionTypes: reactions,
+            reactionCounts: counts,
+            selectedReactionTypeIDs: [],
+            onReact: { _ in },
+            onOpenPostDetail: nil,
+            onOpenComments: {}
+        )
+        .padding()
+    }
+    .preferredColorScheme(.dark)
+}
+
+#Preview("FeedPostRow - Image") {
+    let post = PreviewHelpers.makeImagePost()
+    return ScrollView {
+        FeedPostRow(
+            post: post,
+            authorProfile: PreviewHelpers.makeProfile(),
+            linkedGame: nil,
+            badgeGame: nil,
+            reactionCountOverride: 5,
+            reactionTypes: PreviewHelpers.makeReactionTypes(),
+            reactionCounts: [],
+            selectedReactionTypeIDs: [],
+            onReact: { _ in },
+            onOpenPostDetail: nil,
+            onOpenComments: {}
+        )
+        .padding()
+    }
+    .preferredColorScheme(.dark)
+}
+
+#Preview("FeedPostRow - Link") {
+    let post = PreviewHelpers.makeLinkPost()
+    return ScrollView {
+        FeedPostRow(
+            post: post,
+            authorProfile: PreviewHelpers.makeProfile(),
+            linkedGame: nil,
+            badgeGame: nil,
+            reactionCountOverride: 3,
+            reactionTypes: PreviewHelpers.makeReactionTypes(),
+            reactionCounts: [],
+            selectedReactionTypeIDs: [],
+            onReact: { _ in },
+            onOpenPostDetail: nil,
+            onOpenComments: {}
+        )
+        .padding()
+    }
+    .preferredColorScheme(.dark)
+}
+#endif

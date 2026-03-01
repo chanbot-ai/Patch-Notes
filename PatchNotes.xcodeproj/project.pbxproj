@@ -38,6 +38,7 @@
 		B00000000000000000000013 /* PostCommentsDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000003 /* PostCommentsDetailView.swift */; };
 		B00000000000000000000014 /* NotificationsInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* NotificationsInboxView.swift */; };
 		B00000000000000000000015 /* PostComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000005 /* PostComposerView.swift */; };
+		C00000000000000000000001 /* PreviewHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002 /* PreviewHelpers.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -72,6 +73,7 @@
 		B00000000000000000000003 /* PostCommentsDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostCommentsDetailView.swift; sourceTree = "<group>"; };
 		B00000000000000000000004 /* NotificationsInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsInboxView.swift; sourceTree = "<group>"; };
 		B00000000000000000000005 /* PostComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostComposerView.swift; sourceTree = "<group>"; };
+		C00000000000000000000002 /* PreviewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewHelpers.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -116,6 +118,7 @@
 				A00000000000000000000009 /* Services */,
 				A00000000000000000000005 /* Views */,
 				A00000000000000000000006 /* Model */,
+				C00000000000000000000002 /* PreviewHelpers.swift */,
 				A0000000000000000000001B /* Assets.xcassets */,
 			);
 			path = PatchNotes;
@@ -283,6 +286,7 @@
 				B00000000000000000000013 /* PostCommentsDetailView.swift in Sources */,
 				B00000000000000000000014 /* NotificationsInboxView.swift in Sources */,
 				B00000000000000000000015 /* PostComposerView.swift in Sources */,
+				C00000000000000000000001 /* PreviewHelpers.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

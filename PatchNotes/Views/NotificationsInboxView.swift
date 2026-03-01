@@ -263,3 +263,37 @@ private struct NotificationRow: View {
         return notification.bodyText
     }
 }
+
+// MARK: - Previews
+
+#if DEBUG
+#Preview("Notifications - Empty") {
+    let store = AppStore()
+    return NavigationStack {
+        NotificationsInboxView(onOpenNotificationPost: { _ in })
+            .environmentObject(store)
+    }
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Notifications - Populated") {
+    let actorID = UUID(uuidString: "22222222-0000-0000-0000-000000000002")!
+    let actor = PreviewHelpers.makeProfile(id: actorID, username: "galacticat", displayName: "Galacticat")
+    let notifications = [
+        PreviewHelpers.makeNotification(type: "post_comment", read: false, createdAt: Date().addingTimeInterval(-1800)),
+        PreviewHelpers.makeNotification(type: "comment_reply", read: false, createdAt: Date().addingTimeInterval(-7200)),
+        PreviewHelpers.makeNotification(type: "post_comment", read: true, createdAt: Date().addingTimeInterval(-90000)),
+        PreviewHelpers.makeNotification(type: "comment_reply", read: true, createdAt: Date().addingTimeInterval(-180000))
+    ]
+    let store = AppStore()
+    store.seedPreviewState(AppPreviewState(
+        notifications: notifications,
+        notificationActorProfilesByID: [actorID: actor]
+    ))
+    return NavigationStack {
+        NotificationsInboxView(onOpenNotificationPost: { _ in })
+            .environmentObject(store)
+    }
+    .preferredColorScheme(.dark)
+}
+#endif

@@ -513,3 +513,47 @@ struct CommentRowCard: View {
         return "u/\(authorProfile.username)"
     }
 }
+
+// MARK: - Previews
+
+#if DEBUG
+#Preview("Comments - Populated") {
+    let post = PreviewHelpers.makePost(commentCount: 3)
+    let comments = [
+        PreviewHelpers.makeComment(postID: post.id, body: "Absolutely wild reveal."),
+        PreviewHelpers.makeComment(postID: post.id, body: "Been waiting for this since 2023."),
+        PreviewHelpers.makeComment(postID: post.id, body: "Day one buy for me.")
+    ]
+    let profile = PreviewHelpers.makeProfile()
+    let reactions = PreviewHelpers.makeReactionTypes()
+    let store = AppStore()
+    store.seedPreviewState(AppPreviewState(
+        posts: [post],
+        reactionTypes: reactions,
+        reactionCountsByPost: [post.id: PreviewHelpers.makeReactionCounts(postID: post.id)],
+        reactionTotalsByPost: [post.id: 12],
+        publicProfilesByID: [profile.id: profile],
+        commentsByPost: [post.id: comments]
+    ))
+    return NavigationStack {
+        PostCommentsDetailView(post: post)
+            .environmentObject(store)
+    }
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Comments - Empty") {
+    let post = PreviewHelpers.makePost(commentCount: 0)
+    let store = AppStore()
+    store.seedPreviewState(AppPreviewState(
+        posts: [post],
+        reactionTypes: PreviewHelpers.makeReactionTypes(),
+        commentsByPost: [post.id: []]
+    ))
+    return NavigationStack {
+        PostCommentsDetailView(post: post)
+            .environmentObject(store)
+    }
+    .preferredColorScheme(.dark)
+}
+#endif

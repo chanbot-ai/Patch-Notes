@@ -280,3 +280,18 @@ extension PostComposerView {
         return error.localizedDescription
     }
 }
+
+// MARK: - Previews
+
+#if DEBUG
+#Preview("PostComposer") {
+    let store = AppStore()
+    let authManager = AuthManager()
+    return NavigationStack {
+        PostComposerView(onPostCreated: {})
+            .environmentObject(store)
+            .environmentObject(authManager)
+    }
+    .preferredColorScheme(.dark)
+}
+#endif

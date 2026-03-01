@@ -354,3 +354,55 @@ struct ReactionErrorToast: View {
         .shadow(color: .black.opacity(0.22), radius: 10, y: 6)
     }
 }
+
+// MARK: - Previews
+
+#if DEBUG
+#Preview("FeedView - Populated") {
+    let post1 = PreviewHelpers.makePost(title: "Marathon season 1 details leaked", reactionCount: 44, hotScore: 88.0)
+    let post2 = PreviewHelpers.makeImagePost()
+    let post3 = PreviewHelpers.makeLinkPost()
+    let reactions = PreviewHelpers.makeReactionTypes()
+    let store = AppStore()
+    store.seedPreviewState(AppPreviewState(
+        posts: [post1, post2, post3],
+        reactionTypes: reactions,
+        reactionCountsByPost: [
+            post1.id: PreviewHelpers.makeReactionCounts(postID: post1.id, fireCount: 40, hypeCount: 4),
+            post2.id: [],
+            post3.id: []
+        ],
+        reactionTotalsByPost: [post1.id: 44, post2.id: 0, post3.id: 0]
+    ))
+    let authManager = AuthManager()
+    return NavigationStack {
+        FeedView()
+            .environmentObject(store)
+            .environmentObject(authManager)
+    }
+    .preferredColorScheme(.dark)
+}
+
+#Preview("FeedView - Loading") {
+    let store = AppStore()
+    store.seedPreviewState(AppPreviewState(feedIsLoading: true))
+    let authManager = AuthManager()
+    return NavigationStack {
+        FeedView()
+            .environmentObject(store)
+            .environmentObject(authManager)
+    }
+    .preferredColorScheme(.dark)
+}
+
+#Preview("FeedView - Empty") {
+    let store = AppStore()
+    let authManager = AuthManager()
+    return NavigationStack {
+        FeedView()
+            .environmentObject(store)
+            .environmentObject(authManager)
+    }
+    .preferredColorScheme(.dark)
+}
+#endif
