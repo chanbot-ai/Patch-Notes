@@ -40,6 +40,10 @@ final class AppStore: ObservableObject {
     @Published private(set) var followingPosts: [Post]
     @Published private(set) var followingFeedIsLoading: Bool
     @Published private(set) var followingFeedErrorMessage: String?
+    @Published private(set) var hotFeedHasMore: Bool
+    @Published private(set) var hotFeedIsLoadingMore: Bool
+    @Published private(set) var followingFeedHasMore: Bool
+    @Published private(set) var followingFeedIsLoadingMore: Bool
     @Published private(set) var gameCatalogByID: [Game.ID: Game]
     @Published private(set) var ownedGames: [Game]
     @Published private(set) var upcomingReleases: [Game]
@@ -63,8 +67,10 @@ final class AppStore: ObservableObject {
     private var hasSubscribedToCommentMetrics = false
     private var hasSubscribedToNotifications = false
     private var commentOffsetsByPost: [UUID: Int]
+    private var commentCacheAccessOrder: [UUID] = []
     private let commentPageSize = 20
     private let maxCachedCommentsPerPost = 100
+    private let maxCachedCommentPosts = 30
     private var inFlightPostRefreshIDs: Set<UUID>
     private var inFlightPostReactionKeys: Set<String>
     private var inFlightCommentReactionKeys: Set<String>
@@ -73,6 +79,10 @@ final class AppStore: ObservableObject {
     private var pendingNotificationsRefreshTask: Task<Void, Never>?
     private var pendingFollowingFeedRealtimeRefreshTask: Task<Void, Never>?
     private var inFlightFollowToggleGameIDs: Set<Game.ID>
+    private var hotFeedCursor: FeedCursor?
+    private var followingFeedCursor: FeedCursor?
+    private let initialFeedPageSize = 25
+    private let feedPageSize = 20
     private var hasLoadedFollowingFeedOnce: Bool
 
     init(
@@ -126,6 +136,12 @@ final class AppStore: ObservableObject {
         self.pendingCommentRealtimePostIDs = []
         self.inFlightFollowToggleGameIDs = []
         self.hasLoadedFollowingFeedOnce = false
+        self.hotFeedHasMore = true
+        self.hotFeedIsLoadingMore = false
+        self.followingFeedHasMore = true
+        self.followingFeedIsLoadingMore = false
+        self.hotFeedCursor = nil
+        self.followingFeedCursor = nil
         refresh(referenceDate: referenceDate)
         configureFeedOwnership()
     }
@@ -347,6 +363,7 @@ final class AppStore: ObservableObject {
             commentHasMoreByPost = [:]
             commentSortByPost = [:]
             commentOffsetsByPost = [:]
+            commentCacheAccessOrder = []
             reactionErrorMessage = nil
             followingPosts = []
             followingFeedErrorMessage = nil
@@ -361,6 +378,12 @@ final class AppStore: ObservableObject {
             pendingNotificationsRefreshTask = nil
             pendingFollowingFeedRealtimeRefreshTask?.cancel()
             pendingFollowingFeedRealtimeRefreshTask = nil
+            hotFeedCursor = nil
+            hotFeedHasMore = true
+            hotFeedIsLoadingMore = false
+            followingFeedCursor = nil
+            followingFeedHasMore = true
+            followingFeedIsLoadingMore = false
             hasLoadedFollowingFeedOnce = false
         }
     }
@@ -409,6 +432,7 @@ final class AppStore: ObservableObject {
     }
 
     func ensureCommentsLoaded(for postId: UUID) {
+        touchCommentCache(for: postId)
         if commentsByPost[postId] == nil {
             loadInitialComments(for: postId)
         }
@@ -635,14 +659,26 @@ final class AppStore: ObservableObject {
         subscribeToNotificationsRealtime()
         feedIsLoading = true
         feedErrorMessage = nil
+        hotFeedCursor = nil
+        hotFeedHasMore = true
         defer { feedIsLoading = false }
 
         do {
-            let fetchedPosts = try await feedService.fetchHotFeed()
+            let fetchedPosts = try await feedService.fetchHotFeed(
+                cursor: nil, limit: initialFeedPageSize
+            )
             cachePublicProfiles(from: fetchedPosts)
             await refreshPublicProfiles(for: fetchedPosts.compactMap(\.authorID))
             await hydrateGameCatalog(for: fetchedPosts)
             applyHotFeedPosts(fetchedPosts, animated: false)
+
+            if fetchedPosts.isEmpty {
+                hotFeedHasMore = false
+            } else {
+                hotFeedCursor = FeedCursor.from(fetchedPosts[fetchedPosts.count - 1])
+                hotFeedHasMore = fetchedPosts.count == initialFeedPageSize
+            }
+
             let postIDs = fetchedPosts.map(\.id)
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -652,6 +688,70 @@ final class AppStore: ObservableObject {
             feedErrorMessage = error.localizedDescription
             print("Error loading hot feed:", error)
         }
+    }
+
+    func loadMoreHotFeed() {
+        guard !hotFeedIsLoadingMore, hotFeedHasMore, let cursor = hotFeedCursor else { return }
+        Task { await fetchHotFeedPage(cursor: cursor) }
+    }
+
+    private func fetchHotFeedPage(cursor: FeedCursor) async {
+        hotFeedIsLoadingMore = true
+        defer { hotFeedIsLoadingMore = false }
+
+        do {
+            let fetched = try await feedService.fetchHotFeed(
+                cursor: cursor, limit: feedPageSize
+            )
+
+            if fetched.isEmpty {
+                hotFeedHasMore = false
+                return
+            }
+
+            let existingIDs = Set(posts.map(\.id))
+            let newPosts = fetched.filter { !existingIDs.contains($0.id) }
+
+            if !newPosts.isEmpty {
+                cachePublicProfiles(from: newPosts)
+                await refreshPublicProfiles(for: newPosts.compactMap(\.authorID))
+                await hydrateGameCatalog(for: newPosts)
+                appendHotFeedPosts(newPosts)
+                await refreshReactionState(for: newPosts.map(\.id))
+            }
+
+            hotFeedCursor = FeedCursor.from(fetched[fetched.count - 1])
+            hotFeedHasMore = fetched.count == feedPageSize
+        } catch {
+            print("Error loading more hot feed:", error)
+        }
+    }
+
+    private func appendHotFeedPosts(_ newPosts: [Post]) {
+        let previousBreakdowns = reactionCountsByPost
+        let previousViewerSelections = viewerReactionTypeIDsByPost
+
+        var updatedPosts = posts
+        updatedPosts.append(contentsOf: newPosts)
+        posts = updatedPosts
+
+        var updatedTotals = reactionTotalsByPost
+        for post in newPosts {
+            updatedTotals[post.id] = post.reaction_count ?? 0
+        }
+        reactionTotalsByPost = updatedTotals
+
+        var updatedCounts = reactionCountsByPost
+        for post in newPosts {
+            updatedCounts[post.id] = previousBreakdowns[post.id] ?? []
+        }
+        reactionCountsByPost = updatedCounts
+
+        var updatedViewer = viewerReactionTypeIDsByPost
+        for post in newPosts {
+            updatedViewer[post.id] = previousViewerSelections[post.id] ?? []
+        }
+        viewerReactionTypeIDsByPost = updatedViewer
     }
 
     func refreshFollowingFeed() async {
@@ -673,21 +773,101 @@ final class AppStore: ObservableObject {
         subscribeToNotificationsRealtime()
         followingFeedIsLoading = true
         followingFeedErrorMessage = nil
+        followingFeedCursor = nil
+        followingFeedHasMore = true
         defer { followingFeedIsLoading = false }
 
         do {
-            let fetched = try await feedService.fetchFollowingFeed(accessToken: accessToken)
+            let fetched = try await feedService.fetchFollowingFeed(
+                accessToken: accessToken, cursor: nil, limit: initialFeedPageSize
+            )
             cachePublicProfiles(from: fetched)
             await refreshPublicProfiles(for: fetched.compactMap(\.authorID))
             await hydrateGameCatalog(for: fetched)
             hasLoadedFollowingFeedOnce = true
             followingPosts = fetched.sorted(by: Self.sortPosts)
+
+            if fetched.isEmpty {
+                followingFeedHasMore = false
+            } else {
+                followingFeedCursor = FeedCursor.from(fetched[fetched.count - 1])
+                followingFeedHasMore = fetched.count == initialFeedPageSize
+            }
+
             let postIDs = fetched.map(\.id)
             await refreshReactionState(for: postIDs)
         } catch {
             followingFeedErrorMessage = error.localizedDescription
             print("Error loading following feed:", error)
         }
+    }
+
+    func loadMoreFollowingFeed() {
+        guard !followingFeedIsLoadingMore, followingFeedHasMore,
+              let cursor = followingFeedCursor,
+              let session = authenticatedSession else { return }
+        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else { return }
+        Task { await fetchFollowingFeedPage(cursor: cursor, accessToken: accessToken) }
+    }
+
+    private func fetchFollowingFeedPage(cursor: FeedCursor, accessToken: String) async {
+        followingFeedIsLoadingMore = true
+        defer { followingFeedIsLoadingMore = false }
+
+        do {
+            let fetched = try await feedService.fetchFollowingFeed(
+                accessToken: accessToken, cursor: cursor, limit: feedPageSize
+            )
+
+            if fetched.isEmpty {
+                followingFeedHasMore = false
+                return
+            }
+
+            let existingIDs = Set(followingPosts.map(\.id))
+            let newPosts = fetched.filter { !existingIDs.contains($0.id) }
+
+            if !newPosts.isEmpty {
+                cachePublicProfiles(from: newPosts)
+                await refreshPublicProfiles(for: newPosts.compactMap(\.authorID))
+                await hydrateGameCatalog(for: newPosts)
+                appendFollowingFeedPosts(newPosts)
+                await refreshReactionState(for: newPosts.map(\.id))
+            }
+
+            followingFeedCursor = FeedCursor.from(fetched[fetched.count - 1])
+            followingFeedHasMore = fetched.count == feedPageSize
+        } catch {
+            print("Error loading more following feed:", error)
+        }
+    }
+
+    private func appendFollowingFeedPosts(_ newPosts: [Post]) {
+        let previousBreakdowns = reactionCountsByPost
+        let previousViewerSelections = viewerReactionTypeIDsByPost
+
+        var updatedPosts = followingPosts
+        updatedPosts.append(contentsOf: newPosts)
+        followingPosts = updatedPosts
+
+        var updatedTotals = reactionTotalsByPost
+        for post in newPosts {
+            updatedTotals[post.id] = post.reaction_count ?? 0
+        }
+        reactionTotalsByPost = updatedTotals
+
+        var updatedCounts = reactionCountsByPost
+        for post in newPosts {
+            updatedCounts[post.id] = previousBreakdowns[post.id] ?? []
+        }
+        reactionCountsByPost = updatedCounts
+
+        var updatedViewer = viewerReactionTypeIDsByPost
+        for post in newPosts {
+            updatedViewer[post.id] = previousViewerSelections[post.id] ?? []
+        }
+        viewerReactionTypeIDsByPost = updatedViewer
     }
 
     func refreshFollowedGames() async {
@@ -768,6 +948,7 @@ final class AppStore: ObservableObject {
                         commentSortByPost = nextCommentSort
                     }
                     commentOffsetsByPost.removeValue(forKey: postId)
+                    commentCacheAccessOrder.removeAll { $0 == postId }
                     if !removedCommentIDs.isEmpty {
                         var nextCommentReactionCounts = commentReactionCountsByComment
                         var nextViewerCommentReactions = viewerCommentReactionTypeIDsByComment
@@ -1346,6 +1527,50 @@ final class AppStore: ObservableObject {
         }
     }
 
+    private func touchCommentCache(for postId: UUID) {
+        commentCacheAccessOrder.removeAll { $0 == postId }
+        commentCacheAccessOrder.append(postId)
+        while commentCacheAccessOrder.count > maxCachedCommentPosts {
+            let evictId = commentCacheAccessOrder.removeFirst()
+            evictCommentCache(for: evictId)
+        }
+    }
+
+    private func evictCommentCache(for postId: UUID) {
+        let commentIDs = (commentsByPost[postId] ?? []).map(\.id)
+
+        var nextComments = commentsByPost
+        nextComments.removeValue(forKey: postId)
+        commentsByPost = nextComments
+
+        commentIsLoadingByPost.remove(postId)
+
+        var nextErrors = commentLoadErrorByPost
+        nextErrors.removeValue(forKey: postId)
+        commentLoadErrorByPost = nextErrors
+
+        var nextHasMore = commentHasMoreByPost
+        nextHasMore.removeValue(forKey: postId)
+        commentHasMoreByPost = nextHasMore
+
+        var nextSort = commentSortByPost
+        nextSort.removeValue(forKey: postId)
+        commentSortByPost = nextSort
+
+        commentOffsetsByPost.removeValue(forKey: postId)
+
+        if !commentIDs.isEmpty {
+            var nextReactionCounts = commentReactionCountsByComment
+            var nextViewerReactions = viewerCommentReactionTypeIDsByComment
+            for id in commentIDs {
+                nextReactionCounts.removeValue(forKey: id)
+                nextViewerReactions.removeValue(forKey: id)
+            }
+            commentReactionCountsByComment = nextReactionCounts
+            viewerCommentReactionTypeIDsByComment = nextViewerReactions
+        }
+    }
+
     private func applyOptimisticCommentInsert(_ comment: Comment) {
         var nextComments = commentsByPost
         var current = nextComments[comment.postID] ?? []
@@ -1632,6 +1857,40 @@ final class AppStore: ObservableObject {
         viewerCommentReactionTypeIDsByComment = nextViewer
     }
 }
+
+// MARK: - Preview Support
+
+#if DEBUG
+struct AppPreviewState {
+    var posts: [Post] = []
+    var followingPosts: [Post] = []
+    var reactionTypes: [ReactionType] = []
+    var reactionCountsByPost: [UUID: [PostReactionCount]] = [:]
+    var reactionTotalsByPost: [UUID: Int] = [:]
+    var notifications: [AppNotification] = []
+    var notificationActorProfilesByID: [UUID: PublicProfile] = [:]
+    var publicProfilesByID: [UUID: PublicProfile] = [:]
+    var commentsByPost: [UUID: [Comment]] = [:]
+    var feedIsLoading: Bool = false
+    var notificationsIsLoading: Bool = false
+}
+
+extension AppStore {
+    func seedPreviewState(_ state: AppPreviewState) {
+        posts = state.posts
+        followingPosts = state.followingPosts
+        reactionTypes = state.reactionTypes
+        reactionCountsByPost = state.reactionCountsByPost
+        reactionTotalsByPost = state.reactionTotalsByPost
+        notifications = state.notifications
+        notificationActorProfilesByID = state.notificationActorProfilesByID
+        publicProfilesByID = state.publicProfilesByID
+        commentsByPost = state.commentsByPost
+        feedIsLoading = state.feedIsLoading
+        notificationsIsLoading = state.notificationsIsLoading
+    }
+}
+#endif
 
 struct AppSeedData {
     let ownedGames: [Game]

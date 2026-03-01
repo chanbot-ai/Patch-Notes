@@ -74,6 +74,17 @@ final class FeedService {
         let genre: String?
     }
 
+    private struct NewPostInsert: Encodable {
+        let author_id: UUID
+        let game_id: UUID?
+        let type: String
+        let title: String?
+        let body: String?
+        let media_url: String?
+        let thumbnail_url: String?
+        let is_system_generated: Bool
+    }
+
     private struct NotificationReadUpdatePayload: Encodable {
         let read: Bool
     }
@@ -246,22 +257,36 @@ final class FeedService {
         onNotificationsChange = nil
     }
 
-    func fetchHotFeed() async throws -> [Post] {
+    private struct FeedPageParams: Encodable {
+        let p_cursor_score: Double?
+        let p_cursor_created_at: String?
+        let p_cursor_id: String?
+        let p_limit: Int
+
+        init(cursor: FeedCursor?, limit: Int) {
+            self.p_cursor_score = cursor?.hotScore
+            self.p_cursor_created_at = cursor.map {
+                FeedService.postgresTimestampWithFractionalSeconds.string(from: $0.createdAt)
+            }
+            self.p_cursor_id = cursor?.id.uuidString
+            self.p_limit = limit
+        }
+    }
+
+    func fetchHotFeed(cursor: FeedCursor? = nil, limit: Int = 25) async throws -> [Post] {
+        let params = FeedPageParams(cursor: cursor, limit: limit)
         let response = try await client
-            .from("hot_feed_view")
-            .select()
-            .limit(50)
+            .rpc("fetch_hot_feed_page", params: params)
             .execute()
 
         return try makeDatabaseDecoder().decode([Post].self, from: response.data)
     }
 
-    func fetchFollowingFeed(accessToken: String) async throws -> [Post] {
+    func fetchFollowingFeed(accessToken: String, cursor: FeedCursor? = nil, limit: Int = 25) async throws -> [Post] {
         let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        let params = FeedPageParams(cursor: cursor, limit: limit)
         let response = try await client
-            .from("following_feed_view")
-            .select()
-            .limit(50)
+            .rpc("fetch_following_feed_page", params: params)
             .execute()
 
         return try makeDatabaseDecoder().decode([Post].self, from: response.data)
@@ -320,6 +345,34 @@ final class FeedService {
             }
             throw error
         }
+    }
+
+    func createPost(
+        authorID: UUID,
+        gameID: UUID?,
+        type: String,
+        title: String?,
+        body: String?,
+        mediaURL: String?,
+        thumbnailURL: String?,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await client
+            .from("posts")
+            .insert(
+                NewPostInsert(
+                    author_id: authorID,
+                    game_id: gameID,
+                    type: type,
+                    title: title,
+                    body: body,
+                    media_url: mediaURL,
+                    thumbnail_url: thumbnailURL,
+                    is_system_generated: false
+                )
+            )
+            .execute()
     }
 
     func fetchGameCatalog(ids: [UUID]) async throws -> [Game] {

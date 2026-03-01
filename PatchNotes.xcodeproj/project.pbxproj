@@ -32,6 +32,13 @@
 		A0000000000000000000004A /* FeedBadgeStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000027 /* FeedBadgeStyle.swift */; };
 		A0000000000000000000004B /* FeedBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000028 /* FeedBadgeView.swift */; };
 		A0000000000000000000004C /* MatchDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000029 /* MatchDetailView.swift */; };
+		A0000000000000000000004D /* FeedCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002A /* FeedCursor.swift */; };
+		B00000000000000000000011 /* FeedPostRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000001 /* FeedPostRow.swift */; };
+		B00000000000000000000012 /* PostMediaPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* PostMediaPreview.swift */; };
+		B00000000000000000000013 /* PostCommentsDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000003 /* PostCommentsDetailView.swift */; };
+		B00000000000000000000014 /* NotificationsInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* NotificationsInboxView.swift */; };
+		B00000000000000000000015 /* PostComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000005 /* PostComposerView.swift */; };
+		C00000000000000000000001 /* PreviewHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002 /* PreviewHelpers.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -60,6 +67,13 @@
 		A00000000000000000000027 /* FeedBadgeStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedBadgeStyle.swift; sourceTree = "<group>"; };
 		A00000000000000000000028 /* FeedBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedBadgeView.swift; sourceTree = "<group>"; };
 		A00000000000000000000029 /* MatchDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchDetailView.swift; sourceTree = "<group>"; };
+		A0000000000000000000002A /* FeedCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedCursor.swift; sourceTree = "<group>"; };
+		B00000000000000000000001 /* FeedPostRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedPostRow.swift; sourceTree = "<group>"; };
+		B00000000000000000000002 /* PostMediaPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostMediaPreview.swift; sourceTree = "<group>"; };
+		B00000000000000000000003 /* PostCommentsDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostCommentsDetailView.swift; sourceTree = "<group>"; };
+		B00000000000000000000004 /* NotificationsInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsInboxView.swift; sourceTree = "<group>"; };
+		B00000000000000000000005 /* PostComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostComposerView.swift; sourceTree = "<group>"; };
+		C00000000000000000000002 /* PreviewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewHelpers.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -101,8 +115,10 @@
 				A0000000000000000000001E /* FeedService.swift */,
 				A00000000000000000000025 /* PublicProfileService.swift */,
 				A00000000000000000000007 /* Feed */,
+				A00000000000000000000009 /* Services */,
 				A00000000000000000000005 /* Views */,
 				A00000000000000000000006 /* Model */,
+				C00000000000000000000002 /* PreviewHelpers.swift */,
 				A0000000000000000000001B /* Assets.xcassets */,
 			);
 			path = PatchNotes;
@@ -120,6 +136,11 @@
 				A00000000000000000000017 /* MyGamesView.swift */,
 				A00000000000000000000018 /* EsportsView.swift */,
 				A00000000000000000000029 /* MatchDetailView.swift */,
+				B00000000000000000000001 /* FeedPostRow.swift */,
+				B00000000000000000000002 /* PostMediaPreview.swift */,
+				B00000000000000000000003 /* PostCommentsDetailView.swift */,
+				B00000000000000000000004 /* NotificationsInboxView.swift */,
+				B00000000000000000000005 /* PostComposerView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -151,6 +172,14 @@
 				A00000000000000000000028 /* FeedBadgeView.swift */,
 			);
 			path = Badges;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000009 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000002A /* FeedCursor.swift */,
+			);
+			path = Services;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -251,6 +280,13 @@
 				A0000000000000000000004A /* FeedBadgeStyle.swift in Sources */,
 				A0000000000000000000004B /* FeedBadgeView.swift in Sources */,
 				A0000000000000000000004C /* MatchDetailView.swift in Sources */,
+				A0000000000000000000004D /* FeedCursor.swift in Sources */,
+				B00000000000000000000011 /* FeedPostRow.swift in Sources */,
+				B00000000000000000000012 /* PostMediaPreview.swift in Sources */,
+				B00000000000000000000013 /* PostCommentsDetailView.swift in Sources */,
+				B00000000000000000000014 /* NotificationsInboxView.swift in Sources */,
+				B00000000000000000000015 /* PostComposerView.swift in Sources */,
+				C00000000000000000000001 /* PreviewHelpers.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

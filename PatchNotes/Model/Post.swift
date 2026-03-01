@@ -169,18 +169,6 @@ struct Post: Identifiable, Decodable {
     }
 }
 
-private extension URL {
-    var isTwitterStatusURL: Bool {
-        guard let host = host?.lowercased() else { return false }
-        let isSupportedHost = host == "x.com"
-            || host.hasSuffix(".x.com")
-            || host == "twitter.com"
-            || host.hasSuffix(".twitter.com")
-        guard isSupportedHost else { return false }
-        return pathComponents.contains("status")
-    }
-}
-
 struct ReactionType: Identifiable, Decodable, Equatable {
     let id: UUID
     let slug: String
