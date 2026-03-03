@@ -39,6 +39,8 @@
 		B00000000000000000000014 /* NotificationsInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* NotificationsInboxView.swift */; };
 		B00000000000000000000015 /* PostComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000005 /* PostComposerView.swift */; };
 		C00000000000000000000001 /* PreviewHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002 /* PreviewHelpers.swift */; };
+		D00000000000000000000011 /* OnboardingGame.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000001 /* OnboardingGame.swift */; };
+		D00000000000000000000012 /* GameSelectionOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000002 /* GameSelectionOnboardingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -74,6 +76,8 @@
 		B00000000000000000000004 /* NotificationsInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsInboxView.swift; sourceTree = "<group>"; };
 		B00000000000000000000005 /* PostComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostComposerView.swift; sourceTree = "<group>"; };
 		C00000000000000000000002 /* PreviewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewHelpers.swift; sourceTree = "<group>"; };
+		D00000000000000000000001 /* OnboardingGame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingGame.swift; sourceTree = "<group>"; };
+		D00000000000000000000002 /* GameSelectionOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameSelectionOnboardingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -141,6 +145,7 @@
 				B00000000000000000000003 /* PostCommentsDetailView.swift */,
 				B00000000000000000000004 /* NotificationsInboxView.swift */,
 				B00000000000000000000005 /* PostComposerView.swift */,
+				D00000000000000000000002 /* GameSelectionOnboardingView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -152,6 +157,7 @@
 				A0000000000000000000001A /* AppStore.swift */,
 				A0000000000000000000001D /* Post.swift */,
 				A00000000000000000000024 /* PublicProfile.swift */,
+				D00000000000000000000001 /* OnboardingGame.swift */,
 			);
 			path = Model;
 			sourceTree = "<group>";
@@ -287,6 +293,8 @@
 				B00000000000000000000014 /* NotificationsInboxView.swift in Sources */,
 				B00000000000000000000015 /* PostComposerView.swift in Sources */,
 				C00000000000000000000001 /* PreviewHelpers.swift in Sources */,
+				D00000000000000000000011 /* OnboardingGame.swift in Sources */,
+				D00000000000000000000012 /* GameSelectionOnboardingView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
