@@ -65,7 +65,7 @@ final class AppStore: ObservableObject {
     private var authenticatedSession: Session?
     private var reactionErrorDismissTask: Task<Void, Never>?
     private var hasSubscribedToCommentMetrics = false
-    private var hasSubscribedToNotifications = false
+    private var notificationsPollTimer: Task<Void, Never>?
     private var commentOffsetsByPost: [UUID: Int]
     private var commentCacheAccessOrder: [UUID] = []
     private let commentPageSize = 20
@@ -76,7 +76,6 @@ final class AppStore: ObservableObject {
     private var inFlightCommentReactionKeys: Set<String>
     private var pendingCommentRealtimePostIDs: Set<UUID>
     private var pendingCommentRealtimeRefreshTask: Task<Void, Never>?
-    private var pendingNotificationsRefreshTask: Task<Void, Never>?
     private var pendingFollowingFeedRealtimeRefreshTask: Task<Void, Never>?
     private var inFlightFollowToggleGameIDs: Set<Game.ID>
     private var hotFeedCursor: FeedCursor?
@@ -306,7 +305,7 @@ final class AppStore: ObservableObject {
     func startHotFeed() {
         loadReactionTypes()
         subscribeToFeedRealtime()
-        subscribeToNotificationsRealtime()
+        startNotificationsPolling()
         if posts.isEmpty && !feedIsLoading {
             loadHotFeed()
         }
@@ -329,13 +328,10 @@ final class AppStore: ObservableObject {
         let didRotateAccessToken = previousUserID == newUserID && previousAccessToken != newAccessToken
 
         if previousUserID != newUserID || didRotateAccessToken {
-            hasSubscribedToNotifications = false
-            feedService.resetNotificationsSubscription()
+            stopNotificationsPolling()
         }
 
         if previousUserID != newUserID {
-            pendingNotificationsRefreshTask?.cancel()
-            pendingNotificationsRefreshTask = nil
             notifications = []
             notificationActorProfilesByID = [:]
             notificationsErrorMessage = nil
@@ -355,7 +351,7 @@ final class AppStore: ObservableObject {
         if session == nil {
             hasSubscribed = false
             hasSubscribedToCommentMetrics = false
-            hasSubscribedToNotifications = false
+            stopNotificationsPolling()
             feedService.resetAllRealtimeSubscriptions()
             viewerReactionTypeIDsByPost = [:]
             viewerCommentReactionTypeIDsByComment = [:]
@@ -377,8 +373,6 @@ final class AppStore: ObservableObject {
             pendingCommentRealtimePostIDs = []
             pendingCommentRealtimeRefreshTask?.cancel()
             pendingCommentRealtimeRefreshTask = nil
-            pendingNotificationsRefreshTask?.cancel()
-            pendingNotificationsRefreshTask = nil
             pendingFollowingFeedRealtimeRefreshTask?.cancel()
             pendingFollowingFeedRealtimeRefreshTask = nil
             hotFeedCursor = nil
@@ -644,22 +638,27 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func subscribeToNotificationsRealtime() {
-        guard !hasSubscribedToNotifications else { return }
-        guard let session = authenticatedSession else { return }
+    func startNotificationsPolling() {
+        guard authenticatedSession != nil else { return }
+        guard notificationsPollTimer == nil else { return }
 
-        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !accessToken.isEmpty else { return }
-
-        hasSubscribedToNotifications = true
-        feedService.subscribeToNotifications(accessToken: accessToken) { [weak self] in
-            self?.scheduleNotificationsRefresh()
+        notificationsPollTimer = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
+                guard !Task.isCancelled, let self, self.authenticatedSession != nil else { break }
+                await self.refreshNotifications()
+            }
         }
+    }
+
+    private func stopNotificationsPolling() {
+        notificationsPollTimer?.cancel()
+        notificationsPollTimer = nil
     }
 
     func refreshHotFeed() async {
         subscribeToFeedRealtime()
-        subscribeToNotificationsRealtime()
+        startNotificationsPolling()
         feedIsLoading = true
         feedErrorMessage = nil
         hotFeedCursor = nil
@@ -772,7 +771,7 @@ final class AppStore: ObservableObject {
         }
 
         subscribeToFeedRealtime()
-        subscribeToNotificationsRealtime()
+        startNotificationsPolling()
         followingFeedIsLoading = true
         followingFeedErrorMessage = nil
         followingFeedCursor = nil
@@ -1035,7 +1034,7 @@ final class AppStore: ObservableObject {
             return
         }
 
-        subscribeToNotificationsRealtime()
+        startNotificationsPolling()
         notificationsIsLoading = true
         notificationsErrorMessage = nil
         defer { notificationsIsLoading = false }
@@ -1047,15 +1046,13 @@ final class AppStore: ObservableObject {
         } catch {
             if isNotificationsAuthError(error),
                syncAuthenticatedSessionFromSupabaseIfNeeded(expectedUserID: session.user.id) {
-                hasSubscribedToNotifications = false
-                feedService.resetNotificationsSubscription()
+                stopNotificationsPolling()
                 await refreshNotifications()
                 return
             }
 
             if isNotificationsAuthError(error) {
-                hasSubscribedToNotifications = false
-                feedService.resetNotificationsSubscription()
+                stopNotificationsPolling()
             }
 
             notificationsErrorMessage = friendlyNotificationsErrorMessage(for: error)
@@ -1359,18 +1356,6 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private func scheduleNotificationsRefresh() {
-        guard authenticatedSession != nil else { return }
-        pendingNotificationsRefreshTask?.cancel()
-        pendingNotificationsRefreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard !Task.isCancelled else { return }
-            self.pendingNotificationsRefreshTask = nil
-            await self.refreshNotifications()
-        }
-    }
-
     private func scheduleFollowingFeedRealtimeRefresh() {
         guard authenticatedSession != nil else { return }
         guard hasLoadedFollowingFeedOnce else { return }
@@ -1571,6 +1556,14 @@ final class AppStore: ObservableObject {
             commentReactionCountsByComment = nextReactionCounts
             viewerCommentReactionTypeIDsByComment = nextViewerReactions
         }
+
+        unsubscribeFromCommentMetricsIfIdle()
+    }
+
+    private func unsubscribeFromCommentMetricsIfIdle() {
+        guard hasSubscribedToCommentMetrics, commentsByPost.isEmpty else { return }
+        hasSubscribedToCommentMetrics = false
+        feedService.resetCommentMetricsSubscription()
     }
 
     private func applyOptimisticCommentInsert(_ comment: Comment) {
