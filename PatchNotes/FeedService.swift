@@ -251,10 +251,52 @@ final class FeedService {
     }
 
     func resetNotificationsSubscription() {
+        let existingChannel = notificationsChannel
+        let existingClient = notificationsRealtimeClient
+
         notificationsSubscription = nil
         notificationsChannel = nil
         notificationsRealtimeClient = nil
         onNotificationsChange = nil
+
+        disposeRealtimeChannel(existingChannel, using: existingClient)
+    }
+
+    func resetPostMetricsSubscription() {
+        let existingChannel = postMetricsChannel
+
+        postMetricsSubscription = nil
+        postMetricsChannel = nil
+        onPostMetricsChange = nil
+
+        disposeRealtimeChannel(existingChannel, using: client)
+    }
+
+    func resetCommentMetricsSubscription() {
+        let existingChannel = commentMetricsChannel
+
+        commentMetricsSubscription = nil
+        commentMetricsChannel = nil
+        onCommentMetricsChange = nil
+
+        disposeRealtimeChannel(existingChannel, using: client)
+    }
+
+    func resetAllRealtimeSubscriptions() {
+        resetPostMetricsSubscription()
+        resetCommentMetricsSubscription()
+        resetNotificationsSubscription()
+    }
+
+    private func disposeRealtimeChannel(
+        _ channel: RealtimeChannelV2?,
+        using client: SupabaseClient?
+    ) {
+        guard let channel, let client else { return }
+        Task {
+            await channel.unsubscribe()
+            await client.removeChannel(channel)
+        }
     }
 
     private struct FeedPageParams: Encodable {

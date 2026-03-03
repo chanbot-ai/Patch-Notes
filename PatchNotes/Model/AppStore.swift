@@ -306,7 +306,6 @@ final class AppStore: ObservableObject {
     func startHotFeed() {
         loadReactionTypes()
         subscribeToFeedRealtime()
-        subscribeToCommentMetricsRealtime()
         subscribeToNotificationsRealtime()
         if posts.isEmpty && !feedIsLoading {
             loadHotFeed()
@@ -354,6 +353,10 @@ final class AppStore: ObservableObject {
         }
 
         if session == nil {
+            hasSubscribed = false
+            hasSubscribedToCommentMetrics = false
+            hasSubscribedToNotifications = false
+            feedService.resetAllRealtimeSubscriptions()
             viewerReactionTypeIDsByPost = [:]
             viewerCommentReactionTypeIDsByComment = [:]
             commentReactionCountsByComment = [:]
@@ -419,6 +422,7 @@ final class AppStore: ObservableObject {
     }
 
     func loadInitialComments(for postId: UUID) {
+        subscribeToCommentMetricsRealtime()
         commentOffsetsByPost[postId] = 0
         var nextComments = commentsByPost
         nextComments[postId] = []
@@ -655,7 +659,6 @@ final class AppStore: ObservableObject {
 
     func refreshHotFeed() async {
         subscribeToFeedRealtime()
-        subscribeToCommentMetricsRealtime()
         subscribeToNotificationsRealtime()
         feedIsLoading = true
         feedErrorMessage = nil
@@ -769,7 +772,6 @@ final class AppStore: ObservableObject {
         }
 
         subscribeToFeedRealtime()
-        subscribeToCommentMetricsRealtime()
         subscribeToNotificationsRealtime()
         followingFeedIsLoading = true
         followingFeedErrorMessage = nil
