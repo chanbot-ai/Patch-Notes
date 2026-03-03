@@ -20,6 +20,7 @@ struct GameSelectionOnboardingView: View {
     ]
 
     private static let categoryOrder = [
+        "Upcoming", "Award Winners", "Popular", "Classics",
         "Multiplatform", "PlayStation", "Xbox", "Nintendo", "PC"
     ]
 
@@ -153,7 +154,8 @@ struct GameSelectionOnboardingView: View {
                 ZStack(alignment: .topTrailing) {
                     // Cover image or placeholder
                     gameCover(game)
-                        .frame(height: 130)
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 130, maxHeight: 130)
+                        .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     if isSelected {
