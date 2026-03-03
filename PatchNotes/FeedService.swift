@@ -94,12 +94,8 @@ final class FeedService {
     private var postMetricsSubscription: RealtimeSubscription?
     private var commentMetricsChannel: RealtimeChannelV2?
     private var commentMetricsSubscription: RealtimeSubscription?
-    private var notificationsRealtimeClient: SupabaseClient?
-    private var notificationsChannel: RealtimeChannelV2?
-    private var notificationsSubscription: RealtimeSubscription?
     var onPostMetricsChange: (@MainActor @Sendable (UUID?) -> Void)?
     var onCommentMetricsChange: (@MainActor @Sendable (UUID?) -> Void)?
-    var onNotificationsChange: (@MainActor @Sendable () -> Void)?
     private static let iso8601WithFractionalSeconds: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -212,56 +208,6 @@ final class FeedService {
         }
     }
 
-    func subscribeToNotifications(
-        accessToken: String,
-        onChange: @escaping @MainActor @Sendable () -> Void
-    ) {
-        onNotificationsChange = onChange
-        subscribeToNotifications(accessToken: accessToken)
-    }
-
-    func subscribeToNotifications(accessToken: String) {
-        guard notificationsChannel == nil else { return }
-
-        let realtimeClient = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
-        let channel = realtimeClient.channel("public:notifications")
-        let onNotificationsChange = onNotificationsChange
-        let subscription = channel.onPostgresChange(
-            AnyAction.self,
-            schema: "public",
-            table: "notifications"
-        ) { _ in
-            Task { @MainActor in
-                onNotificationsChange?()
-            }
-        }
-
-        notificationsRealtimeClient = realtimeClient
-        notificationsChannel = channel
-        notificationsSubscription = subscription
-
-        Task {
-            do {
-                try await channel.subscribeWithError()
-                print("Subscribed to notifications realtime updates")
-            } catch {
-                print("Notifications realtime subscription error:", error)
-            }
-        }
-    }
-
-    func resetNotificationsSubscription() {
-        let existingChannel = notificationsChannel
-        let existingClient = notificationsRealtimeClient
-
-        notificationsSubscription = nil
-        notificationsChannel = nil
-        notificationsRealtimeClient = nil
-        onNotificationsChange = nil
-
-        disposeRealtimeChannel(existingChannel, using: existingClient)
-    }
-
     func resetPostMetricsSubscription() {
         let existingChannel = postMetricsChannel
 
@@ -285,7 +231,6 @@ final class FeedService {
     func resetAllRealtimeSubscriptions() {
         resetPostMetricsSubscription()
         resetCommentMetricsSubscription()
-        resetNotificationsSubscription()
     }
 
     private func disposeRealtimeChannel(
