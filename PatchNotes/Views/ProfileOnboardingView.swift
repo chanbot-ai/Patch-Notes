@@ -17,6 +17,10 @@ struct AppUserProfileRecord: Identifiable, Decodable, Equatable {
         return hasText(display_name) || hasText(username)
     }
 
+    var hasProfileInfo: Bool {
+        hasText(display_name) && hasText(username)
+    }
+
     var preferredDisplayName: String {
         if let displayName = display_name?.trimmingCharacters(in: .whitespacesAndNewlines), !displayName.isEmpty {
             return displayName
@@ -112,7 +116,8 @@ final class ProfileGateViewModel: ObservableObject {
     enum Phase {
         case idle
         case loading
-        case needsCompletion(AppUserProfileRecord?)
+        case needsProfile(AppUserProfileRecord?)
+        case needsGameSelection(AppUserProfileRecord)
         case ready(AppUserProfileRecord?)
         case error(String)
     }
@@ -152,15 +157,17 @@ final class ProfileGateViewModel: ObservableObject {
             currentProfile = profile
             if let profile, profile.isComplete {
                 phase = .ready(profile)
+            } else if let profile, profile.hasProfileInfo {
+                phase = .needsGameSelection(profile)
             } else {
-                phase = .needsCompletion(profile)
+                phase = .needsProfile(profile)
             }
         } catch {
             phase = .error(error.localizedDescription)
         }
     }
 
-    func completeProfile(session: Session?, displayName: String, username: String?) async {
+    func completeProfile(session: Session?, displayName: String, username: String?, markOnboardingComplete: Bool = false) async {
         guard let session else { return }
 
         isSaving = true
@@ -172,11 +179,41 @@ final class ProfileGateViewModel: ObservableObject {
                 userID: session.user.id,
                 displayName: displayName,
                 username: username,
+                markOnboardingComplete: markOnboardingComplete,
                 accessToken: session.accessToken
             )
             saveSuccessMessage = "Profile saved"
             isSaving = false
             try? await Task.sleep(nanoseconds: 650_000_000)
+            await refresh(session: session)
+        } catch {
+            isSaving = false
+            saveErrorMessage = error.localizedDescription
+        }
+    }
+
+    func completeGameSelection(session: Session?, gameIDs: [UUID]) async {
+        guard let session else { return }
+
+        isSaving = true
+        saveErrorMessage = nil
+        saveSuccessMessage = nil
+
+        do {
+            try await FeedService().bulkFollowGames(
+                userID: session.user.id,
+                gameIDs: gameIDs,
+                accessToken: session.accessToken
+            )
+
+            try await service.markOnboardingComplete(
+                userID: session.user.id,
+                accessToken: session.accessToken
+            )
+
+            isSaving = false
+            saveSuccessMessage = "You're all set!"
+            try? await Task.sleep(nanoseconds: 500_000_000)
             await refresh(session: session)
         } catch {
             isSaving = false
@@ -216,10 +253,23 @@ private struct UserProfileService {
         return try decodeUsernameAvailability(from: response.data)
     }
 
+    func markOnboardingComplete(
+        userID: UUID,
+        accessToken: String
+    ) async throws {
+        let client = try authedClient(accessToken: accessToken)
+        try await client
+            .from("users")
+            .update(["onboarding_complete": true])
+            .eq("id", value: userID.uuidString)
+            .execute()
+    }
+
     func upsertProfile(
         userID: UUID,
         displayName: String,
         username: String?,
+        markOnboardingComplete: Bool = true,
         accessToken: String
     ) async throws {
         let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -264,7 +314,7 @@ private struct UserProfileService {
                         id: userID,
                         display_name: trimmedDisplayName,
                         username: resolvedUsername,
-                        onboarding_complete: true
+                        onboarding_complete: markOnboardingComplete
                     ),
                     onConflict: "id"
                 )
@@ -392,7 +442,7 @@ struct ProfileOnboardingView: View {
         var subtitle: String {
             switch self {
             case .onboarding:
-                return "Add a display name before entering the app."
+                return "Add a display name to get started."
             case .editProfile:
                 return "Update your public profile details."
             }
@@ -400,7 +450,7 @@ struct ProfileOnboardingView: View {
 
         var primaryButtonTitle: String {
             switch self {
-            case .onboarding: return "Continue to Patch Notes"
+            case .onboarding: return "Next"
             case .editProfile: return "Save Profile"
             }
         }

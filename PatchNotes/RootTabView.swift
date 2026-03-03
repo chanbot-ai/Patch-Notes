@@ -318,23 +318,10 @@ private struct EditPublicProfileView: View {
                     .padding(20)
                 }
                 .preferredColorScheme(.dark)
-            case .needsCompletion(let profile), .ready(let profile):
-                ProfileOnboardingView(
-                    mode: .editProfile,
-                    profile: profile,
-                    fallbackEmail: authManager.session?.user.email,
-                    isSaving: profileGate.isSaving,
-                    errorMessage: profileGate.saveErrorMessage,
-                    successMessage: profileGate.saveSuccessMessage
-                ) { displayName, username in
-                    await profileGate.completeProfile(
-                        session: authManager.session,
-                        displayName: displayName,
-                        username: username
-                    )
-                }
-                .environmentObject(authManager)
-                .environmentObject(settings)
+            case .needsProfile(let profile), .ready(let profile):
+                editProfileView(profile: profile)
+            case .needsGameSelection(let profile):
+                editProfileView(profile: profile)
             }
         }
         .navigationTitle("Edit Profile")
@@ -364,6 +351,27 @@ private struct EditPublicProfileView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func editProfileView(profile: AppUserProfileRecord?) -> some View {
+        ProfileOnboardingView(
+            mode: .editProfile,
+            profile: profile,
+            fallbackEmail: authManager.session?.user.email,
+            isSaving: profileGate.isSaving,
+            errorMessage: profileGate.saveErrorMessage,
+            successMessage: profileGate.saveSuccessMessage
+        ) { displayName, username in
+            await profileGate.completeProfile(
+                session: authManager.session,
+                displayName: displayName,
+                username: username,
+                markOnboardingComplete: true
+            )
+        }
+        .environmentObject(authManager)
+        .environmentObject(settings)
     }
 }
 

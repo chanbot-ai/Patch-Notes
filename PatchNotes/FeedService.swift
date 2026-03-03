@@ -779,6 +779,47 @@ final class FeedService {
         return UUID(uuidString: commentID)
     }
 
+    // MARK: - Onboarding Game Catalog
+
+    struct OnboardingGameRow: Decodable {
+        let id: UUID
+        let title: String
+        let cover_image_url: String?
+        let genre: String?
+        let category: String?
+    }
+
+    func fetchOnboardingGameCatalog() async throws -> [OnboardingGameRow] {
+        let response = try await client
+            .from("games")
+            .select("id,title,cover_image_url,genre,category")
+            .not("category", operator: .is, value: "null")
+            .order("category")
+            .order("title")
+            .execute()
+
+        return try JSONDecoder().decode([OnboardingGameRow].self, from: response.data)
+    }
+
+    private struct BulkFollowParams: Encodable {
+        let p_user_id: UUID
+        let p_game_ids: [UUID]
+    }
+
+    func bulkFollowGames(
+        userID: UUID,
+        gameIDs: [UUID],
+        accessToken: String
+    ) async throws {
+        let authedClient = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await authedClient
+            .rpc("bulk_follow_games", params: BulkFollowParams(
+                p_user_id: userID,
+                p_game_ids: gameIDs
+            ))
+            .execute()
+    }
+
     private func makeDatabaseDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in

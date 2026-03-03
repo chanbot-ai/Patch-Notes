@@ -62,7 +62,7 @@ private struct AuthenticatedRootView: View {
                 }
                 .preferredColorScheme(.dark)
 
-            case .needsCompletion(let profile):
+            case .needsProfile(let profile):
                 ProfileOnboardingView(
                     profile: profile,
                     fallbackEmail: authManager.session?.user.email,
@@ -76,6 +76,18 @@ private struct AuthenticatedRootView: View {
                         username: username
                     )
                 }
+
+            case .needsGameSelection:
+                GameSelectionOnboardingView(
+                    onComplete: { selectedGameIDs in
+                        await profileGate.completeGameSelection(
+                            session: authManager.session,
+                            gameIDs: selectedGameIDs
+                        )
+                    },
+                    isSaving: profileGate.isSaving,
+                    errorMessage: profileGate.saveErrorMessage
+                )
 
             case .ready:
                 AppBootstrapView()

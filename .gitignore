@@ -1,6 +1,14 @@
 .DS_Store
 **/.DS_Store
 
+# Xcode build artifacts
+build/
+DerivedData/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcbuilddata/
+
 # Local Supabase tooling / credentials (never commit secrets)
 .env.supabase.local
 tools/bin/
