@@ -345,15 +345,37 @@ struct FeedView: View {
     private var emptyStateView: some View {
         if case .game = feedFilter {
             GlassCard {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("No posts in \(activeGameTitle ?? "this game") yet")
-                        .font(.headline.weight(.bold))
-                        .fontDesign(.rounded)
-                        .foregroundStyle(.white)
-                    Text("Check back soon for updates and discussions.")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.72))
+                VStack(spacing: 16) {
+                    Image(systemName: "newspaper")
+                        .font(.system(size: 36))
+                        .foregroundStyle(AppTheme.accent.opacity(0.6))
+
+                    VStack(spacing: 6) {
+                        Text("Nothing here yet")
+                            .font(.headline.weight(.bold))
+                            .fontDesign(.rounded)
+                            .foregroundStyle(.white)
+                        Text("When news drops for \(activeGameTitle ?? "this game"), it'll show up here and in your home feed since you follow this community.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Button {
+                        feedFilter = .forYou
+                    } label: {
+                        Text("Back to For You")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(AppTheme.accent.opacity(0.28), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
             }
         } else {
             GlassCard {

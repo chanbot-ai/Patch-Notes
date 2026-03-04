@@ -591,8 +591,9 @@ final class FeedService {
     func fetchReactionTypes() async throws -> [ReactionType] {
         let response = try await client
             .from("reaction_types")
-            .select("id,slug,display_name,emoji")
-            .order("slug", ascending: true)
+            .select("id,slug,display_name,emoji,category,sort_order")
+            .order("category", ascending: true)
+            .order("sort_order", ascending: true)
             .execute()
 
         return try JSONDecoder().decode([ReactionType].self, from: response.data)

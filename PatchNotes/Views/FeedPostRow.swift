@@ -203,42 +203,14 @@ struct FeedPostRow: View {
     // MARK: - Reaction Picker
 
     private var reactionPickerGrid: some View {
-        VStack(spacing: 12) {
-            Text("React")
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(.white)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 12) {
-                ForEach(reactionTypes) { type in
-                    let isSelected = selectedReactionTypeIDs.contains(type.id)
-                    Button {
-                        onReact(type.id)
-                        showingReactionPicker = false
-                    } label: {
-                        Text(type.emoji)
-                            .font(.title)
-                            .frame(width: 44, height: 44)
-                            .background(
-                                isSelected
-                                    ? AppTheme.accent.opacity(0.25)
-                                    : Color.white.opacity(0.06),
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            )
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(
-                                        isSelected ? AppTheme.accent.opacity(0.5) : Color.white.opacity(0.1),
-                                        lineWidth: 1
-                                    )
-                            }
-                    }
-                    .buttonStyle(.plain)
-                }
+        ReactionPickerSheet(
+            reactionTypes: reactionTypes,
+            selectedReactionTypeIDs: selectedReactionTypeIDs,
+            onReact: { typeID in
+                onReact(typeID)
+                showingReactionPicker = false
             }
-        }
-        .padding(16)
-        .frame(minWidth: 240)
-        .background(AppTheme.surfaceTop)
-        .presentationCompactAdaptation(.popover)
+        )
     }
 
     // MARK: - Author Row
@@ -247,13 +219,27 @@ struct FeedPostRow: View {
     private var authorRow: some View {
         if let authorText = authorDisplayName {
             HStack(spacing: 4) {
-                Image(systemName: "seal.fill")
-                    .font(.caption2)
-                    .foregroundStyle(AppTheme.accent)
+                if authorProfile?.isBot == true {
+                    Image(systemName: "gearshape.fill")
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.accentBlue)
+                } else {
+                    Image(systemName: "seal.fill")
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.accent)
+                }
                 Text(authorText)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.58))
                     .lineLimit(1)
+                if authorProfile?.isBot == true {
+                    Text("BOT")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(AppTheme.accentBlue)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(AppTheme.accentBlue.opacity(0.15), in: Capsule())
+                }
             }
         }
     }

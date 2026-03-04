@@ -115,7 +115,8 @@ struct Post: Identifiable, Decodable {
             username: author_username,
             display_name: author_display_name,
             avatar_url: author_avatar_url,
-            created_at: author_created_at
+            created_at: author_created_at,
+            is_bot: nil
         )
     }
 
@@ -174,6 +175,38 @@ struct ReactionType: Identifiable, Decodable, Equatable {
     let slug: String
     let display_name: String?
     let emoji: String
+    let category: String?
+    let sort_order: Int?
+}
+
+enum ReactionCategory: String, CaseIterable, Identifiable {
+    case core, hype, fail, watching, gaming, memes, social
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .core: return "Core"
+        case .hype: return "Hype"
+        case .fail: return "Fail / Salt"
+        case .watching: return "Watching"
+        case .gaming: return "Gaming"
+        case .memes: return "Memes"
+        case .social: return "Social"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .core: return "😂"
+        case .hype: return "🚀"
+        case .fail: return "💀"
+        case .watching: return "👀"
+        case .gaming: return "🎮"
+        case .memes: return "🐸"
+        case .social: return "❤️"
+        }
+    }
 }
 
 struct PostReactionCount: Identifiable, Decodable, Equatable {
@@ -213,7 +246,8 @@ struct Comment: Identifiable, Decodable, Equatable {
             username: author_username,
             display_name: author_display_name,
             avatar_url: author_avatar_url,
-            created_at: author_created_at
+            created_at: author_created_at,
+            is_bot: nil
         )
     }
 }
