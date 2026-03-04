@@ -123,13 +123,24 @@ enum MediaFallback {
     static let videoThumbnail = URL(string: "https://dummyimage.com/1280x720/050a1a/e9eeff.png&text=Patch+Notes+Video")!
 }
 
+private final class RemoteImageCache: @unchecked Sendable {
+    static let shared = RemoteImageCache()
+    private let cache = NSCache<NSURL, UIImage>()
+
+    init() { cache.countLimit = 120 }
+
+    func image(for url: URL) -> UIImage? { cache.object(forKey: url as NSURL) }
+    func set(_ image: UIImage, for url: URL) { cache.setObject(image, forKey: url as NSURL) }
+}
+
 struct RemoteMediaImage: View {
     let primaryURL: URL?
     let alternatePrimaryURLs: [URL]
     let fallbackURL: URL
     let contentMode: ContentMode
 
-    @State private var candidateIndex = 0
+    @State private var loadedImage: UIImage?
+    @State private var loadFailed = false
 
     init(
         primaryURL: URL?,
@@ -143,74 +154,61 @@ struct RemoteMediaImage: View {
         self.contentMode = contentMode
     }
 
-    private var candidateURLs: [URL] {
-        var ordered: [URL] = []
-        if let primaryURL {
-            ordered.append(primaryURL)
+    private var allCandidateURLs: [URL] {
+        var urls: [URL] = []
+        if let primaryURL { urls.append(primaryURL) }
+        for url in alternatePrimaryURLs where !urls.contains(url) {
+            urls.append(url)
         }
-        for url in alternatePrimaryURLs where !ordered.contains(url) {
-            ordered.append(url)
-        }
-        return ordered
-    }
-
-    private var activeCandidateURL: URL? {
-        guard candidateURLs.indices.contains(candidateIndex) else { return nil }
-        return candidateURLs[candidateIndex]
+        urls.append(fallbackURL)
+        return urls
     }
 
     var body: some View {
         Group {
-            if let activeCandidateURL {
-                AsyncImage(url: activeCandidateURL) { phase in
-                    switch phase {
-                    case .empty:
-                        loadingView
-                    case .success(let image):
-                        resolvedImage(image)
-                    case .failure:
-                        if hasRemainingCandidate(after: activeCandidateURL) {
-                            loadingView
-                                .onAppear {
-                                    advanceCandidate(after: activeCandidateURL)
-                                }
-                        } else {
-                            fallbackImage
-                        }
-                    @unknown default:
-                        fallbackImage
-                    }
-                }
+            if let loadedImage {
+                resolvedImage(Image(uiImage: loadedImage))
+            } else if loadFailed {
+                LinearGradient(
+                    colors: [AppTheme.surfaceTop.opacity(0.95), AppTheme.surfaceBottom.opacity(0.98)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
             } else {
-                fallbackImage
+                loadingView
             }
         }
-        .onChange(of: candidateURLs) { _, _ in
-            candidateIndex = 0
+        .task(id: primaryURL) {
+            await loadFromCandidates()
         }
     }
 
-    private var fallbackImage: some View {
-        AsyncImage(url: fallbackURL) { phase in
-            switch phase {
-            case .empty:
-                loadingView
-            case .success(let image):
-                resolvedImage(image)
-            case .failure:
-                LinearGradient(
-                    colors: [AppTheme.surfaceTop.opacity(0.95), AppTheme.surfaceBottom.opacity(0.98)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            @unknown default:
-                LinearGradient(
-                    colors: [AppTheme.surfaceTop.opacity(0.95), AppTheme.surfaceBottom.opacity(0.98)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+    private func loadFromCandidates() async {
+        loadedImage = nil
+        loadFailed = false
+
+        for url in allCandidateURLs {
+            if let cached = RemoteImageCache.shared.image(for: url) {
+                loadedImage = cached
+                return
+            }
+            do {
+                var request = URLRequest(url: url)
+                request.setValue("PatchNotes/1.0 (iOS; like Safari)", forHTTPHeaderField: "User-Agent")
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if Task.isCancelled { return }
+                guard let http = response as? HTTPURLResponse,
+                      (200...299).contains(http.statusCode),
+                      let image = UIImage(data: data) else { continue }
+                RemoteImageCache.shared.set(image, for: url)
+                loadedImage = image
+                return
+            } catch {
+                if Task.isCancelled { return }
+                continue
             }
         }
+        loadFailed = true
     }
 
     private var loadingView: some View {
@@ -238,16 +236,6 @@ struct RemoteMediaImage: View {
         }
     }
 
-    private func hasRemainingCandidate(after url: URL) -> Bool {
-        guard let index = candidateURLs.firstIndex(of: url) else { return false }
-        return index + 1 < candidateURLs.count
-    }
-
-    private func advanceCandidate(after failedURL: URL) {
-        guard let activeCandidateURL, activeCandidateURL == failedURL else { return }
-        guard candidateIndex + 1 < candidateURLs.count else { return }
-        candidateIndex += 1
-    }
 }
 
 struct InAppSafariView: UIViewControllerRepresentable {

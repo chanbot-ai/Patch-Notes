@@ -130,15 +130,16 @@ struct PostCommentsDetailView: View {
                 ForEach(rootComments) { comment in
                     let replies = repliesByParent[comment.id] ?? []
                     let repliesExpanded = expandedReplyParentIDs.contains(comment.id)
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 0) {
                         CommentRowCard(
                             comment: comment,
-                            authorProfile: store.publicProfile(for: comment.userID),
+                            authorProfile: store.publicProfile(for: comment.userID) ?? comment.authorProfile,
                             isReply: false,
                             reactionTypes: store.reactionTypes,
                             reactionCounts: store.commentReactionCounts(for: comment.id),
                             selectedReactionTypeIDs: store.viewerCommentReactionTypeIDsByComment[comment.id] ?? [],
                             reactionTotalOverride: store.commentReactionTotal(for: comment),
+                            authorFavoriteGames: store.favoriteGames(for: comment.userID),
                             onReact: { reactionTypeID in
                                 store.reactToComment(comment.id, reactionTypeId: reactionTypeID)
                             },
@@ -149,6 +150,11 @@ struct PostCommentsDetailView: View {
 
                         if !replies.isEmpty {
                             HStack(spacing: 8) {
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.10))
+                                    .frame(width: 2)
+                                    .padding(.leading, 16)
+
                                 Button {
                                     withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                         if repliesExpanded {
@@ -158,49 +164,55 @@ struct PostCommentsDetailView: View {
                                         }
                                     }
                                 } label: {
-                                    HStack(spacing: 6) {
+                                    HStack(spacing: 5) {
                                         Image(systemName: repliesExpanded ? "chevron.down" : "chevron.right")
                                             .font(.caption2.weight(.bold))
-                                        Text(repliesExpanded ? "Hide Replies" : "View Replies")
+                                        Text("\(replies.count) \(replies.count == 1 ? "Reply" : "Replies")")
                                             .font(.caption.weight(.semibold))
-                                        Text("\(replies.count)")
-                                            .font(.caption2.weight(.bold))
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Color.white.opacity(0.08), in: Capsule())
                                     }
-                                    .foregroundStyle(.white.opacity(0.78))
+                                    .foregroundStyle(.white.opacity(0.60))
+                                    .padding(.vertical, 2)
                                 }
                                 .buttonStyle(.plain)
 
                                 Spacer()
                             }
-                            .padding(.leading, 4)
 
                             if repliesExpanded {
-                                VStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 0) {
                                     ForEach(replies) { reply in
-                                CommentRowCard(
-                                    comment: reply,
-                                    authorProfile: store.publicProfile(for: reply.userID),
-                                    isReply: true,
-                                    reactionTypes: store.reactionTypes,
-                                    reactionCounts: store.commentReactionCounts(for: reply.id),
-                                    selectedReactionTypeIDs: store.viewerCommentReactionTypeIDsByComment[reply.id] ?? [],
-                                    reactionTotalOverride: store.commentReactionTotal(for: reply),
-                                            onReact: { reactionTypeID in
-                                                store.reactToComment(reply.id, reactionTypeId: reactionTypeID)
-                                            },
-                                            onReply: {
-                                                replyingToRootCommentID = comment.id
-                                            }
-                                        )
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Rectangle()
+                                                .fill(Color.white.opacity(0.10))
+                                                .frame(width: 2)
+
+                                            CommentRowCard(
+                                                comment: reply,
+                                                authorProfile: store.publicProfile(for: reply.userID) ?? reply.authorProfile,
+                                                isReply: true,
+                                                reactionTypes: store.reactionTypes,
+                                                reactionCounts: store.commentReactionCounts(for: reply.id),
+                                                selectedReactionTypeIDs: store.viewerCommentReactionTypeIDsByComment[reply.id] ?? [],
+                                                reactionTotalOverride: store.commentReactionTotal(for: reply),
+                                                authorFavoriteGames: store.favoriteGames(for: reply.userID),
+                                                onReact: { reactionTypeID in
+                                                    store.reactToComment(reply.id, reactionTypeId: reactionTypeID)
+                                                },
+                                                onReply: {
+                                                    replyingToRootCommentID = comment.id
+                                                }
+                                            )
+                                        }
+                                        .padding(.leading, 16)
                                     }
                                 }
                                 .transition(.opacity.combined(with: .move(edge: .top)))
-                                .padding(.leading, 18)
                             }
                         }
+
+                        Divider()
+                            .overlay(Color.white.opacity(0.06))
+                            .padding(.top, 3)
                     }
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
@@ -264,38 +276,91 @@ struct PostCommentsDetailView: View {
     }
 
     private var postHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let authorProfile = store.publicProfile(for: post.authorID) {
-                Text(authorDisplayName(for: authorProfile))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.65))
+        VStack(alignment: .leading, spacing: 10) {
+            // Header: Game icon + info
+            HStack(alignment: .top, spacing: 10) {
+                if let linkedGame {
+                    RemoteMediaImage(
+                        primaryURL: linkedGame.coverImageURL,
+                        fallbackURL: MediaFallback.gameCover
+                    )
+                    .frame(width: 68, height: 68)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    if let linkedGame {
+                        Text(linkedGame.title)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                    }
+
+                    if let authorProfile = store.publicProfile(for: post.authorID) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "seal.fill")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.accent)
+                            Text(authorDisplayName(for: authorProfile))
+                                .font(.callout.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.62))
+                                .lineLimit(1)
+                            let postAuthorBadges = store.favoriteGames(for: post.authorID)
+                            if !postAuthorBadges.isEmpty {
+                                HStack(spacing: 3) {
+                                    ForEach(postAuthorBadges.prefix(3)) { badge in
+                                        RemoteMediaImage(
+                                            primaryURL: badge.coverImageURL,
+                                            fallbackURL: MediaFallback.gameCover
+                                        )
+                                        .frame(width: 18, height: 18)
+                                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                        .overlay {
+                                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                                .stroke(Color.white.opacity(0.25), lineWidth: 0.5)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Text(compactRelativeTimestamp(post.created_at))
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+
+                Spacer(minLength: 0)
             }
+
             if post.isExternalSource {
                 PostSourceMetaRow(post: post, showsOpenLink: true)
             }
+
             if let title = post.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
                 Text(title)
-                    .font(.headline)
+                    .font(.headline.weight(.bold))
+                    .fontDesign(.rounded)
                     .foregroundStyle(.white)
             } else if post.isExternalSource {
                 Text(post.fallbackHeadlineText)
-                    .font(.headline)
+                    .font(.headline.weight(.bold))
+                    .fontDesign(.rounded)
                     .foregroundStyle(.white)
             }
-            if let linkedGame {
-                NavigationLink {
-                    GameReleaseDetailView(game: linkedGame)
-                } label: {
-                    GameContextChip(game: linkedGame)
-                }
-                .buttonStyle(.plain)
-            }
+
             if let body = post.body?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty {
                 Text(body)
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.78))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.76))
             }
+
             PostMediaPreview(post: post, height: 230)
+
             HStack(spacing: 10) {
                 Label("\(post.comment_count ?? 0)", systemImage: "bubble.right")
                 if let hotScore = post.hot_score {
@@ -313,19 +378,20 @@ struct PostCommentsDetailView: View {
             .font(.caption)
             .foregroundStyle(.white.opacity(0.58))
         }
-        .padding(14)
+        .padding(16)
         .background(
             LinearGradient(
-                colors: [Color.white.opacity(0.06), Color.white.opacity(0.03)],
+                colors: [AppTheme.surfaceTop.opacity(0.96), AppTheme.surfaceBottom.opacity(0.98)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.11), lineWidth: 1)
         }
+        .shadow(color: .black.opacity(0.25), radius: 10, y: 5)
     }
 
     private func authorDisplayName(for profile: PublicProfile) -> String {
@@ -333,7 +399,7 @@ struct PostCommentsDetailView: View {
            !displayName.isEmpty {
             return displayName
         }
-        return "u/\(profile.username)"
+        return profile.username
     }
 
     private func topSortScore(for comment: Comment, replyCount: Int) -> Double {
@@ -406,111 +472,117 @@ struct CommentRowCard: View {
     let reactionCounts: [CommentReactionCount]
     let selectedReactionTypeIDs: Set<UUID>
     let reactionTotalOverride: Int
+    var authorFavoriteGames: [FavoriteGameBadge] = []
     let onReact: (UUID) -> Void
     let onReply: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 3) {
+            // Header: author + badges + timestamp + Reply
+            HStack(spacing: 5) {
                 if let authorText = authorDisplayName {
                     Text(authorText)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.68))
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.88))
                 }
-                Text(isReply ? "Reply" : "Comment")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.82))
-                Spacer()
-                if reactionTotalOverride > 0 {
-                    Label("\(reactionTotalOverride)", systemImage: "face.smiling")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.55))
-                }
-                if let hotScore = comment.hot_score, hotScore > 0 {
-                    Label(String(format: "%.0f", hotScore), systemImage: "flame.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.55))
-                }
-                Text(compactRelativeTimestamp(comment.created_at))
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.5))
-            }
 
-            Text(comment.body)
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.86))
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if !reactionTypes.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(reactionTypes) { type in
-                            let count = reactionCounts.first(where: { $0.reactionTypeID == type.id })?.count ?? 0
-                            let isSelected = selectedReactionTypeIDs.contains(type.id)
-                            Button {
-                                onReact(type.id)
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text(type.emoji)
-                                    Text("\(count)")
-                                        .font(.caption2.weight(.semibold))
-                                }
-                                .foregroundStyle(.white.opacity(isSelected ? 0.96 : 0.74))
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 4)
-                                .background(
-                                    (isSelected ? AppTheme.accent.opacity(0.18) : Color.white.opacity(0.04)),
-                                    in: Capsule()
-                                )
-                                .overlay {
-                                    Capsule()
-                                        .stroke(
-                                            isSelected ? AppTheme.accent.opacity(0.4) : Color.white.opacity(0.08),
-                                            lineWidth: 1
-                                        )
-                                }
+                if !authorFavoriteGames.isEmpty {
+                    HStack(spacing: 3) {
+                        ForEach(authorFavoriteGames.prefix(3)) { badge in
+                            RemoteMediaImage(
+                                primaryURL: badge.coverImageURL,
+                                fallbackURL: MediaFallback.gameCover
+                            )
+                            .frame(width: 16, height: 16)
+                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .stroke(Color.white.opacity(0.25), lineWidth: 0.5)
                             }
-                            .buttonStyle(.borderless)
-                        }
-                        if reactionTotalOverride > 0 {
-                            Text("Total \(reactionTotalOverride)")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.48))
                         }
                     }
-                    .padding(.vertical, 1)
+                }
+
+                Text("\u{00B7}")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.35))
+
+                Text(compactRelativeTimestamp(comment.created_at))
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.45))
+
+                Spacer()
+
+                if let onReply {
+                    Button {
+                        onReply()
+                    } label: {
+                        Text("Reply")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
-            if let onReply {
-                Button {
-                    onReply()
-                } label: {
-                    Label("Reply", systemImage: "arrowshape.turn.up.left")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
+            // Body
+            Text(comment.body)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.88))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Inline reactions (compact row)
+            if !reactionTypes.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(reactionTypes.prefix(4)) { type in
+                        let count = reactionCounts.first(where: { $0.reactionTypeID == type.id })?.count ?? 0
+                        let isSelected = selectedReactionTypeIDs.contains(type.id)
+                        Button {
+                            onReact(type.id)
+                        } label: {
+                            HStack(spacing: 2) {
+                                Text(type.emoji)
+                                    .font(.caption2)
+                                Text("\(count)")
+                                    .font(.caption2.weight(.semibold))
+                            }
+                            .foregroundStyle(.white.opacity(isSelected ? 0.96 : 0.50))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(
+                                isSelected ? AppTheme.accent.opacity(0.18) : Color.white.opacity(0.04),
+                                in: Capsule()
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Image(systemName: "face.smiling")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.25))
                 }
-                .buttonStyle(.plain)
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(isReply ? 0.03 : 0.05))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(isReply ? 0.06 : 0.08), lineWidth: 1)
-        }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 4)
     }
 
     private var authorDisplayName: String? {
-        guard let authorProfile else { return nil }
-        if let displayName = authorProfile.display_name?.trimmingCharacters(in: .whitespacesAndNewlines),
+        // Try passed-in profile
+        if let authorProfile {
+            if let displayName = authorProfile.display_name?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !displayName.isEmpty {
+                return displayName
+            }
+            return authorProfile.username
+        }
+        // Fall back to comment's embedded author data
+        if let displayName = comment.author_display_name?.trimmingCharacters(in: .whitespacesAndNewlines),
            !displayName.isEmpty {
             return displayName
         }
-        return "u/\(authorProfile.username)"
+        return comment.author_username
     }
 }
 

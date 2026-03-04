@@ -206,6 +206,15 @@ final class ProfileGateViewModel: ObservableObject {
                 accessToken: session.accessToken
             )
 
+            // Save first 3 selections as profile badges
+            if gameIDs.count >= 3 {
+                try await FeedService().setFavoriteGames(
+                    userID: session.user.id,
+                    gameIDs: Array(gameIDs.prefix(3)),
+                    accessToken: session.accessToken
+                )
+            }
+
             try await service.markOnboardingComplete(
                 userID: session.user.id,
                 accessToken: session.accessToken

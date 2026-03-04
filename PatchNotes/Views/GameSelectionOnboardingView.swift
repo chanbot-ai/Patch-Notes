@@ -7,6 +7,7 @@ struct GameSelectionOnboardingView: View {
 
     @State private var categories: [OnboardingCategory] = []
     @State private var selectedGameIDs: Set<UUID> = []
+    @State private var selectedGameOrder: [UUID] = []
     @State private var isLoadingCatalog = true
     @State private var catalogError: String?
 
@@ -102,6 +103,10 @@ struct GameSelectionOnboardingView: View {
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.70))
 
+            Text("Your first 3 picks become badges on your profile!")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(AppTheme.accent.opacity(0.85))
+
             HStack(spacing: 6) {
                 Image(systemName: selectionMet ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(selectionMet ? .green : .white.opacity(0.5))
@@ -145,8 +150,10 @@ struct GameSelectionOnboardingView: View {
             withAnimation(.spring(duration: 0.25)) {
                 if isSelected {
                     selectedGameIDs.remove(game.id)
+                    selectedGameOrder.removeAll { $0 == game.id }
                 } else {
                     selectedGameIDs.insert(game.id)
+                    selectedGameOrder.append(game.id)
                 }
             }
         } label: {
@@ -253,7 +260,7 @@ struct GameSelectionOnboardingView: View {
 
             Button {
                 Task {
-                    await onComplete(Array(selectedGameIDs))
+                    await onComplete(selectedGameOrder)
                 }
             } label: {
                 HStack(spacing: 10) {

@@ -279,6 +279,33 @@ final class FeedService {
         return try makeDatabaseDecoder().decode([Post].self, from: response.data)
     }
 
+    private struct GameFeedPageParams: Encodable {
+        let p_game_id: String
+        let p_cursor_score: Double?
+        let p_cursor_created_at: String?
+        let p_cursor_id: String?
+        let p_limit: Int
+
+        init(gameID: UUID, cursor: FeedCursor?, limit: Int) {
+            self.p_game_id = gameID.uuidString
+            self.p_cursor_score = cursor?.hotScore
+            self.p_cursor_created_at = cursor.map {
+                FeedService.postgresTimestampWithFractionalSeconds.string(from: $0.createdAt)
+            }
+            self.p_cursor_id = cursor?.id.uuidString
+            self.p_limit = limit
+        }
+    }
+
+    func fetchGameFeed(gameID: UUID, cursor: FeedCursor? = nil, limit: Int = 25) async throws -> [Post] {
+        let params = GameFeedPageParams(gameID: gameID, cursor: cursor, limit: limit)
+        let response = try await client
+            .rpc("fetch_game_feed_page", params: params)
+            .execute()
+
+        return try makeDatabaseDecoder().decode([Post].self, from: response.data)
+    }
+
     func fetchCachedTweets(limit: Int = 40) async throws -> [CachedTweetFeedRow] {
         let response = try await client
             .from("tweets_cache_feed_view")
@@ -402,6 +429,28 @@ final class FeedService {
             try await client
                 .from("user_followed_games")
                 .insert(UserFollowedGameInsertPayload(user_id: userID, game_id: game.id))
+                .execute()
+        } catch {
+            let raw = [error.localizedDescription, String(describing: error)]
+                .joined(separator: " | ")
+                .lowercased()
+            if raw.contains("duplicate key") || raw.contains("user_followed_games_pkey") {
+                return
+            }
+            throw error
+        }
+    }
+
+    func followGameByID(
+        gameID: UUID,
+        userID: UUID,
+        accessToken: String
+    ) async throws {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        do {
+            try await client
+                .from("user_followed_games")
+                .insert(UserFollowedGameInsertPayload(user_id: userID, game_id: gameID))
                 .execute()
         } catch {
             let raw = [error.localizedDescription, String(describing: error)]
@@ -818,6 +867,48 @@ final class FeedService {
                 p_game_ids: gameIDs
             ))
             .execute()
+    }
+
+    // MARK: - Favorite Games
+
+    private struct SetFavoriteGamesParams: Encodable {
+        let p_user_id: UUID
+        let p_game_ids: [UUID]
+    }
+
+    private struct FetchFavoriteGamesParams: Encodable {
+        let p_user_ids: [UUID]
+    }
+
+    struct FavoriteGameRow: Decodable {
+        let user_id: UUID
+        let game_id: UUID
+        let ordinal: Int
+        let game_title: String?
+        let cover_image_url: String?
+    }
+
+    func setFavoriteGames(
+        userID: UUID,
+        gameIDs: [UUID],
+        accessToken: String
+    ) async throws {
+        let authedClient = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await authedClient
+            .rpc("set_user_favorite_games", params: SetFavoriteGamesParams(
+                p_user_id: userID,
+                p_game_ids: Array(gameIDs.prefix(3))
+            ))
+            .execute()
+    }
+
+    func fetchFavoriteGames(userIDs: [UUID]) async throws -> [FavoriteGameRow] {
+        let response = try await client
+            .rpc("fetch_user_favorite_games", params: FetchFavoriteGamesParams(
+                p_user_ids: userIDs
+            ))
+            .execute()
+        return try JSONDecoder().decode([FavoriteGameRow].self, from: response.data)
     }
 
     private func makeDatabaseDecoder() -> JSONDecoder {

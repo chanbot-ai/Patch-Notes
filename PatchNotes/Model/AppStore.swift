@@ -44,6 +44,12 @@ final class AppStore: ObservableObject {
     @Published private(set) var hotFeedIsLoadingMore: Bool
     @Published private(set) var followingFeedHasMore: Bool
     @Published private(set) var followingFeedIsLoadingMore: Bool
+    @Published private(set) var gameFeedPostsByGameID: [Game.ID: [Post]]
+    @Published private(set) var gameFeedIsLoadingByGameID: [Game.ID: Bool]
+    @Published private(set) var gameFeedErrorByGameID: [Game.ID: String]
+    @Published private(set) var gameFeedHasMoreByGameID: [Game.ID: Bool]
+    @Published private(set) var gameFeedIsLoadingMoreByGameID: [Game.ID: Bool]
+    @Published private(set) var favoriteGamesByUserID: [UUID: [FavoriteGameBadge]]
     @Published private(set) var gameCatalogByID: [Game.ID: Game]
     @Published private(set) var ownedGames: [Game]
     @Published private(set) var upcomingReleases: [Game]
@@ -80,6 +86,7 @@ final class AppStore: ObservableObject {
     private var inFlightFollowToggleGameIDs: Set<Game.ID>
     private var hotFeedCursor: FeedCursor?
     private var followingFeedCursor: FeedCursor?
+    private var gameFeedCursorByGameID: [Game.ID: FeedCursor]
     private let initialFeedPageSize = 25
     private let feedPageSize = 20
     private var hasLoadedFollowingFeedOnce: Bool
@@ -115,6 +122,13 @@ final class AppStore: ObservableObject {
         self.followingPosts = []
         self.followingFeedIsLoading = false
         self.followingFeedErrorMessage = nil
+        self.gameFeedPostsByGameID = [:]
+        self.gameFeedIsLoadingByGameID = [:]
+        self.gameFeedErrorByGameID = [:]
+        self.gameFeedHasMoreByGameID = [:]
+        self.gameFeedIsLoadingMoreByGameID = [:]
+        self.gameFeedCursorByGameID = [:]
+        self.favoriteGamesByUserID = [:]
         self.gameCatalogByID = [:]
         self.ownedGames = []
         self.upcomingReleases = []
@@ -157,6 +171,11 @@ final class AppStore: ObservableObject {
         return candidates.filter { game in
             seen.insert(game.id).inserted
         }
+    }
+
+    var followedGamesForPillBar: [Game] {
+        followedGameIDs.compactMap { gameCatalogByID[$0] }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
     func game(for gameID: Game.ID?) -> Game? {
@@ -218,6 +237,8 @@ final class AppStore: ObservableObject {
             var next = followedGameIDs
             next.insert(game.id)
             followedGameIDs = next
+            // Ensure game catalog entry is present so pill bar shows cover art
+            cacheGameCatalog([game])
         }
 
         Task { @MainActor [weak self] in
@@ -243,6 +264,96 @@ final class AppStore: ObservableObject {
                 self.followedGameIDs = previous
                 self.followedGamesErrorMessage = error.localizedDescription
                 print("Failed to toggle followed game:", error)
+            }
+        }
+    }
+
+    func followGameByID(_ gameID: UUID, title: String? = nil, coverImageURL: URL? = nil) {
+        guard !followedGameIDs.contains(gameID) else { return }
+        guard let session = authenticatedSession else { return }
+        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else { return }
+        guard !inFlightFollowToggleGameIDs.contains(gameID) else { return }
+
+        let userID = session.user.id
+        let previous = followedGameIDs
+
+        inFlightFollowToggleGameIDs.insert(gameID)
+
+        // Cache a Game entry immediately so the pill bar shows cover art
+        // without waiting for the async network call.
+        if let title {
+            let placeholder = Game(
+                id: gameID,
+                title: title,
+                publisher: "Unknown Studio",
+                genre: "Game",
+                releaseDate: Date(),
+                similarTitles: [],
+                reviewScores: [],
+                isOwned: false,
+                coverImageURL: coverImageURL,
+                screenshotURLs: []
+            )
+            cacheGameCatalog([placeholder])
+        }
+
+        var next = followedGameIDs
+        next.insert(gameID)
+        followedGameIDs = next
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.inFlightFollowToggleGameIDs.remove(gameID) }
+            do {
+                try await self.feedService.followGameByID(
+                    gameID: gameID,
+                    userID: userID,
+                    accessToken: accessToken
+                )
+                // Refresh catalog from DB (overwrites placeholder with full data)
+                let games = try await self.feedService.fetchGameCatalog(ids: [gameID])
+                self.cacheGameCatalog(games)
+                self.followedGamesErrorMessage = nil
+                await self.refreshFollowingFeed()
+            } catch {
+                self.followedGameIDs = previous
+                self.followedGamesErrorMessage = error.localizedDescription
+                print("Failed to follow game:", error)
+            }
+        }
+    }
+
+    func unfollowGameByID(_ gameID: UUID) {
+        guard followedGameIDs.contains(gameID) else { return }
+        guard let session = authenticatedSession else { return }
+        let accessToken = session.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !accessToken.isEmpty else { return }
+        guard !inFlightFollowToggleGameIDs.contains(gameID) else { return }
+
+        let userID = session.user.id
+        let previous = followedGameIDs
+
+        inFlightFollowToggleGameIDs.insert(gameID)
+        var next = followedGameIDs
+        next.remove(gameID)
+        followedGameIDs = next
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.inFlightFollowToggleGameIDs.remove(gameID) }
+            do {
+                try await self.feedService.unfollowGame(
+                    gameID: gameID,
+                    userID: userID,
+                    accessToken: accessToken
+                )
+                self.followedGamesErrorMessage = nil
+                await self.refreshFollowingFeed()
+            } catch {
+                self.followedGameIDs = previous
+                self.followedGamesErrorMessage = error.localizedDescription
+                print("Failed to unfollow game:", error)
             }
         }
     }
@@ -308,6 +419,9 @@ final class AppStore: ObservableObject {
         startNotificationsPolling()
         if posts.isEmpty && !feedIsLoading {
             loadHotFeed()
+        }
+        if followingPosts.isEmpty && !followingFeedIsLoading {
+            loadFollowingFeed()
         }
         if authenticatedSession != nil, notifications.isEmpty && !notificationsIsLoading {
             loadNotifications()
@@ -382,6 +496,12 @@ final class AppStore: ObservableObject {
             followingFeedHasMore = true
             followingFeedIsLoadingMore = false
             hasLoadedFollowingFeedOnce = false
+            gameFeedPostsByGameID = [:]
+            gameFeedIsLoadingByGameID = [:]
+            gameFeedErrorByGameID = [:]
+            gameFeedHasMoreByGameID = [:]
+            gameFeedIsLoadingMoreByGameID = [:]
+            gameFeedCursorByGameID = [:]
         }
     }
 
@@ -686,6 +806,8 @@ final class AppStore: ObservableObject {
                 guard let self else { return }
                 await self.refreshReactionState(for: postIDs)
             }
+        } catch is CancellationError {
+        } catch let urlError as URLError where urlError.code == .cancelled {
         } catch {
             feedErrorMessage = error.localizedDescription
             print("Error loading hot feed:", error)
@@ -785,6 +907,7 @@ final class AppStore: ObservableObject {
             cachePublicProfiles(from: fetched)
             await refreshPublicProfiles(for: fetched.compactMap(\.authorID))
             await hydrateGameCatalog(for: fetched)
+            loadFavoriteGames(for: fetched.compactMap(\.authorID))
             hasLoadedFollowingFeedOnce = true
             followingPosts = fetched.sorted(by: Self.sortPosts)
 
@@ -797,6 +920,10 @@ final class AppStore: ObservableObject {
 
             let postIDs = fetched.map(\.id)
             await refreshReactionState(for: postIDs)
+        } catch is CancellationError {
+            // Task was cancelled (e.g. user switched pills) — not an error
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession request cancelled — not an error
         } catch {
             followingFeedErrorMessage = error.localizedDescription
             print("Error loading following feed:", error)
@@ -871,6 +998,112 @@ final class AppStore: ObservableObject {
         viewerReactionTypeIDsByPost = updatedViewer
     }
 
+    // MARK: - Per-Game Feed
+
+    func loadGameFeed(for gameID: Game.ID) {
+        Task { await refreshGameFeed(for: gameID) }
+    }
+
+    func refreshGameFeed(for gameID: Game.ID) async {
+        gameFeedIsLoadingByGameID[gameID] = true
+        gameFeedErrorByGameID.removeValue(forKey: gameID)
+        gameFeedCursorByGameID.removeValue(forKey: gameID)
+        gameFeedHasMoreByGameID[gameID] = true
+        defer { gameFeedIsLoadingByGameID[gameID] = false }
+
+        do {
+            let fetched = try await feedService.fetchGameFeed(
+                gameID: gameID, cursor: nil, limit: initialFeedPageSize
+            )
+            cachePublicProfiles(from: fetched)
+            await refreshPublicProfiles(for: fetched.compactMap(\.authorID))
+            await hydrateGameCatalog(for: fetched)
+
+            gameFeedPostsByGameID[gameID] = fetched.sorted(by: Self.sortPosts)
+
+            if fetched.isEmpty {
+                gameFeedHasMoreByGameID[gameID] = false
+            } else {
+                gameFeedCursorByGameID[gameID] = FeedCursor.from(fetched[fetched.count - 1])
+                gameFeedHasMoreByGameID[gameID] = fetched.count == initialFeedPageSize
+            }
+
+            let postIDs = fetched.map(\.id)
+            await refreshReactionState(for: postIDs)
+        } catch is CancellationError {
+        } catch let urlError as URLError where urlError.code == .cancelled {
+        } catch {
+            gameFeedErrorByGameID[gameID] = error.localizedDescription
+            print("Error loading game feed for \(gameID):", error)
+        }
+    }
+
+    func loadMoreGameFeed(for gameID: Game.ID) {
+        guard gameFeedIsLoadingMoreByGameID[gameID] != true,
+              gameFeedHasMoreByGameID[gameID] != false,
+              let cursor = gameFeedCursorByGameID[gameID] else { return }
+        Task { await fetchGameFeedPage(gameID: gameID, cursor: cursor) }
+    }
+
+    private func fetchGameFeedPage(gameID: Game.ID, cursor: FeedCursor) async {
+        gameFeedIsLoadingMoreByGameID[gameID] = true
+        defer { gameFeedIsLoadingMoreByGameID[gameID] = false }
+
+        do {
+            let fetched = try await feedService.fetchGameFeed(
+                gameID: gameID, cursor: cursor, limit: feedPageSize
+            )
+
+            if fetched.isEmpty {
+                gameFeedHasMoreByGameID[gameID] = false
+                return
+            }
+
+            let existingIDs = Set((gameFeedPostsByGameID[gameID] ?? []).map(\.id))
+            let newPosts = fetched.filter { !existingIDs.contains($0.id) }
+
+            if !newPosts.isEmpty {
+                cachePublicProfiles(from: newPosts)
+                await refreshPublicProfiles(for: newPosts.compactMap(\.authorID))
+                await hydrateGameCatalog(for: newPosts)
+                appendGameFeedPosts(newPosts, for: gameID)
+                await refreshReactionState(for: newPosts.map(\.id))
+            }
+
+            gameFeedCursorByGameID[gameID] = FeedCursor.from(fetched[fetched.count - 1])
+            gameFeedHasMoreByGameID[gameID] = fetched.count == feedPageSize
+        } catch {
+            print("Error loading more game feed for \(gameID):", error)
+        }
+    }
+
+    private func appendGameFeedPosts(_ newPosts: [Post], for gameID: Game.ID) {
+        let previousBreakdowns = reactionCountsByPost
+        let previousViewerSelections = viewerReactionTypeIDsByPost
+
+        var updatedPosts = gameFeedPostsByGameID[gameID] ?? []
+        updatedPosts.append(contentsOf: newPosts)
+        gameFeedPostsByGameID[gameID] = updatedPosts
+
+        var updatedTotals = reactionTotalsByPost
+        for post in newPosts {
+            updatedTotals[post.id] = post.reaction_count ?? 0
+        }
+        reactionTotalsByPost = updatedTotals
+
+        var updatedCounts = reactionCountsByPost
+        for post in newPosts {
+            updatedCounts[post.id] = previousBreakdowns[post.id] ?? []
+        }
+        reactionCountsByPost = updatedCounts
+
+        var updatedViewer = viewerReactionTypeIDsByPost
+        for post in newPosts {
+            updatedViewer[post.id] = previousViewerSelections[post.id] ?? []
+        }
+        viewerReactionTypeIDsByPost = updatedViewer
+    }
+
     func refreshFollowedGames() async {
         guard let session = authenticatedSession else {
             followedGameIDs = []
@@ -892,10 +1125,25 @@ final class AppStore: ObservableObject {
         defer { followedGamesIsLoading = false }
 
         do {
-            followedGameIDs = try await feedService.fetchFollowedGameIDs(
+            let serverIDs = try await feedService.fetchFollowedGameIDs(
                 userID: session.user.id,
                 accessToken: accessToken
             )
+            // Merge server IDs with any optimistic follows still in-flight
+            var merged = serverIDs
+            for id in inFlightFollowToggleGameIDs where followedGameIDs.contains(id) {
+                merged.insert(id)
+            }
+            followedGameIDs = merged
+            // Hydrate game catalog for all followed games so pill bar shows cover art
+            if !followedGameIDs.isEmpty {
+                let games = try await feedService.fetchGameCatalog(ids: Array(followedGameIDs))
+                cacheGameCatalog(games)
+            }
+            // Ensure current user's favorite games (badges) are loaded
+            if favoriteGamesByUserID[session.user.id] == nil {
+                loadFavoriteGames(for: [session.user.id])
+            }
         } catch {
             followedGamesErrorMessage = error.localizedDescription
             print("Error loading followed games:", error)
@@ -1167,6 +1415,48 @@ final class AppStore: ObservableObject {
         return publicProfilesByID[userID]
     }
 
+    func favoriteGames(for userID: UUID?) -> [FavoriteGameBadge] {
+        guard let userID else { return [] }
+        return favoriteGamesByUserID[userID] ?? []
+    }
+
+    /// Current user's top 3 badge game IDs (cannot be unfollowed)
+    var currentUserBadgeGameIDs: Set<UUID> {
+        guard let session = authenticatedSession else { return [] }
+        let badges = favoriteGamesByUserID[session.user.id] ?? []
+        return Set(badges.map(\.gameID))
+    }
+
+    func loadFavoriteGames(for userIDs: [UUID]) {
+        let newIDs = userIDs.filter { favoriteGamesByUserID[$0] == nil }
+        guard !newIDs.isEmpty else { return }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let rows = try await self.feedService.fetchFavoriteGames(userIDs: newIDs)
+                var grouped: [UUID: [FavoriteGameBadge]] = [:]
+                for row in rows {
+                    let badge = FavoriteGameBadge(
+                        gameID: row.game_id,
+                        title: row.game_title ?? "",
+                        coverImageURL: row.cover_image_url.flatMap(URL.init(string:)),
+                        ordinal: row.ordinal
+                    )
+                    grouped[row.user_id, default: []].append(badge)
+                }
+                for (userID, badges) in grouped {
+                    self.favoriteGamesByUserID[userID] = badges.sorted { $0.ordinal < $1.ordinal }
+                }
+                for userID in newIDs where grouped[userID] == nil {
+                    self.favoriteGamesByUserID[userID] = []
+                }
+            } catch {
+                // Silently fail - badges are non-critical
+            }
+        }
+    }
+
     func markNotificationRead(_ notificationID: UUID) {
         guard let session = authenticatedSession else { return }
 
@@ -1436,6 +1726,11 @@ final class AppStore: ObservableObject {
         guard !games.isEmpty else { return }
         var next = gameCatalogByID
         for game in games {
+            if let existing = next[game.id],
+               existing.coverImageURL != nil,
+               game.coverImageURL == nil {
+                continue
+            }
             next[game.id] = game
         }
         gameCatalogByID = next
