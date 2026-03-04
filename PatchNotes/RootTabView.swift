@@ -5,7 +5,6 @@ struct RootTabView: View {
     @Environment(\.colorScheme) private var systemColorScheme
 
     @State private var selectedTab: AppTab = .home
-    @State private var showSettings = false
 
     private var resolvedColorScheme: ColorScheme {
         settings.preferredColorScheme ?? systemColorScheme
@@ -33,14 +32,6 @@ struct RootTabView: View {
                 }
 
                 NavigationStack {
-                    SocialView()
-                }
-                .tag(AppTab.social)
-                .tabItem {
-                    Label("Social", systemImage: "bubble.left.and.bubble.right.fill")
-                }
-
-                NavigationStack {
                     MyGamesView()
                 }
                 .tag(AppTab.myGames)
@@ -58,46 +49,13 @@ struct RootTabView: View {
             }
             .modifier(IOSTabBarGlassModifier(useDarkChrome: resolvedColorScheme == .dark))
             .tint(AppTheme.accent)
-            .overlay(alignment: .topTrailing) {
-                settingsButton
-            }
         }
         .sensoryFeedback(.selection, trigger: selectedTab)
         .preferredColorScheme(settings.preferredColorScheme)
         .dynamicTypeSize(settings.largerText ? .xLarge : .large)
         .environment(\.legibilityWeight, settings.highContrastText ? .bold : nil)
-        .sheet(isPresented: $showSettings) {
-            SettingsSheetView()
-                .environmentObject(settings)
-        }
     }
 
-    private var settingsButton: some View {
-        Button {
-            showSettings = true
-        } label: {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white)
-                .padding(12)
-                .background(
-                    LinearGradient(
-                        colors: [AppTheme.surfaceTop.opacity(0.92), AppTheme.surfaceBottom.opacity(0.92)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    in: Circle()
-                )
-                .overlay {
-                    Circle().stroke(Color.white.opacity(0.22), lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.30), radius: 10, y: 4)
-        }
-        .buttonStyle(.plain)
-        .padding(.top, 6)
-        .padding(.trailing, 16)
-        .accessibilityLabel("Open settings")
-    }
 }
 
 private struct IOSTabBarGlassModifier: ViewModifier {
@@ -116,7 +74,7 @@ private struct IOSTabBarGlassModifier: ViewModifier {
     }
 }
 
-private struct SettingsSheetView: View {
+struct SettingsSheetView: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
 

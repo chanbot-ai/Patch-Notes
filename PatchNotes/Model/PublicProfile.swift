@@ -7,3 +7,12 @@ struct PublicProfile: Identifiable, Decodable, Equatable {
     let avatar_url: String?
     let created_at: Date
 }
+
+struct FavoriteGameBadge: Identifiable, Equatable {
+    let gameID: UUID
+    let title: String
+    let coverImageURL: URL?
+    let ordinal: Int
+
+    var id: UUID { gameID }
+}

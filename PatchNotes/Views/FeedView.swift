@@ -12,190 +12,165 @@ func compactRelativeTimestamp(_ date: Date, now: Date = Date()) -> String {
     return "\(delta / 31_536_000)y"
 }
 
-private enum FeedScope: String, CaseIterable, Identifiable {
-    case hot
-    case following
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .hot: return "Hot"
-        case .following: return "Following"
-        }
-    }
+private enum FeedFilter: Hashable {
+    case forYou
+    case game(Game.ID)
 }
 
 struct FeedView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var store: AppStore
+    @EnvironmentObject private var settings: AppSettings
 
     @State private var showingComposer = false
     @State private var showingNotifications = false
+    @State private var showSettings = false
     @State private var selectedCommentsPost: Post?
-    @State private var feedScope: FeedScope = .hot
+    @State private var feedFilter: FeedFilter = .forYou
+
+    // MARK: - Active Feed Computed Properties
 
     private var activePosts: [Post] {
-        switch feedScope {
-        case .hot: return store.posts
-        case .following: return store.followingPosts
+        switch feedFilter {
+        case .forYou:
+            return store.followingPosts
+        case .game(let gameID):
+            return store.gameFeedPostsByGameID[gameID] ?? []
         }
     }
 
     private var activeFeedIsLoading: Bool {
-        switch feedScope {
-        case .hot: return store.feedIsLoading
-        case .following: return store.followingFeedIsLoading
+        switch feedFilter {
+        case .forYou:
+            return store.followingFeedIsLoading
+        case .game(let gameID):
+            return store.gameFeedIsLoadingByGameID[gameID] ?? false
         }
     }
 
     private var activeFeedErrorMessage: String? {
-        switch feedScope {
-        case .hot: return store.feedErrorMessage
-        case .following: return store.followingFeedErrorMessage
+        switch feedFilter {
+        case .forYou:
+            return store.followingFeedErrorMessage
+        case .game(let gameID):
+            return store.gameFeedErrorByGameID[gameID]
         }
     }
 
     private var activeFeedHasMore: Bool {
-        switch feedScope {
-        case .hot: return store.hotFeedHasMore
-        case .following: return store.followingFeedHasMore
+        switch feedFilter {
+        case .forYou:
+            return store.followingFeedHasMore
+        case .game(let gameID):
+            return store.gameFeedHasMoreByGameID[gameID] ?? true
         }
     }
 
     private var activeFeedIsLoadingMore: Bool {
-        switch feedScope {
-        case .hot: return store.hotFeedIsLoadingMore
-        case .following: return store.followingFeedIsLoadingMore
+        switch feedFilter {
+        case .forYou:
+            return store.followingFeedIsLoadingMore
+        case .game(let gameID):
+            return store.gameFeedIsLoadingMoreByGameID[gameID] ?? false
         }
     }
 
-    var body: some View {
-        List {
-            Section {
-                Picker("Feed", selection: $feedScope) {
-                    ForEach(FeedScope.allCases) { scope in
-                        Text(scope.title).tag(scope)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 8, trailing: 12))
-            .listRowBackground(Color.clear)
-
-            if activeFeedIsLoading && activePosts.isEmpty {
-                HStack {
-                    Spacer()
-                    ProgressView("Loading feed...")
-                    Spacer()
-                }
-            }
-
-            if let errorMessage = activeFeedErrorMessage {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Feed Error")
-                        .font(.headline)
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-                .foregroundStyle(.red)
-            }
-
-            if !activeFeedIsLoading && activePosts.isEmpty && activeFeedErrorMessage == nil {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("No posts yet")
-                        .font(.headline)
-                    Text(feedScope == .hot ? "Create the first post from the compose button." : "Follow some games to populate your following feed.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if feedScope == .following {
-                        HStack(spacing: 10) {
-                            NavigationLink {
-                                ReleaseCalendarView()
-                            } label: {
-                                Text("Browse Calendar")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(AppTheme.accent.opacity(0.28), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-
-                            NavigationLink {
-                                MyGamesView()
-                            } label: {
-                                Text("My Games")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Color.white.opacity(0.12), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.top, 4)
-                    }
-                }
-            }
-
-            ForEach(activePosts) { post in
-                FeedPostRow(
-                    post: post,
-                    authorProfile: store.publicProfile(for: post.authorID),
-                    linkedGame: store.game(for: post.gameID),
-                    badgeGame: store.game(for: post.primaryBadgeGameID ?? post.gameID),
-                    reactionCountOverride: store.reactionTotal(for: post),
-                    reactionTypes: store.reactionTypes,
-                    reactionCounts: store.reactionCountsByPost[post.id] ?? [],
-                    selectedReactionTypeIDs: store.viewerReactionTypeIDsByPost[post.id] ?? [],
-                    onReact: { reactionTypeID in
-                        store.react(to: post.id, with: reactionTypeID)
-                    },
-                    onOpenPostDetail: {
-                        selectedCommentsPost = post
-                    },
-                    onOpenComments: {
-                        selectedCommentsPost = post
-                    }
-                )
-                    .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .onAppear {
-                        if shouldLoadMore(for: post) {
-                            loadMoreForActiveScope()
-                        }
-                    }
-            }
-
-            if activeFeedIsLoadingMore {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                        .padding(.vertical, 16)
-                    Spacer()
-                }
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-            }
+    private var activeGameTitle: String? {
+        if case .game(let gameID) = feedFilter {
+            return store.game(for: gameID)?.title
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .navigationTitle("Feed")
+        return nil
+    }
+
+    // MARK: - Body
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                // Title card
+                feedTitleCard
+
+                // Game channel icons (Sleeper-style)
+                gameChannelBar
+
+                // Feed content
+                if activeFeedIsLoading && activePosts.isEmpty {
+                    GlassCard {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .tint(.white)
+                            Text("Loading feed...")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.78))
+                        }
+                    }
+                }
+
+                if let errorMessage = activeFeedErrorMessage {
+                    GlassCard {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Feed Error")
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(.white)
+                            Text(errorMessage)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.72))
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+
+                if !activeFeedIsLoading && activePosts.isEmpty && activeFeedErrorMessage == nil {
+                    emptyStateView
+                }
+
+                LazyVStack(spacing: 14) {
+                    ForEach(activePosts) { post in
+                        FeedPostRow(
+                            post: post,
+                            authorProfile: store.publicProfile(for: post.authorID),
+                            linkedGame: store.game(for: post.gameID),
+                            reactionCountOverride: store.reactionTotal(for: post),
+                            reactionTypes: store.reactionTypes,
+                            reactionCounts: store.reactionCountsByPost[post.id] ?? [],
+                            selectedReactionTypeIDs: store.viewerReactionTypeIDsByPost[post.id] ?? [],
+                            onReact: { reactionTypeID in
+                                store.react(to: post.id, with: reactionTypeID)
+                            },
+                            onOpenPostDetail: {
+                                selectedCommentsPost = post
+                            },
+                            onOpenComments: {
+                                selectedCommentsPost = post
+                            },
+                            onGameTap: { gameID in
+                                feedFilter = .game(gameID)
+                            }
+                        )
+                        .onAppear {
+                            if shouldLoadMore(for: post) {
+                                loadMoreForActiveScope()
+                            }
+                        }
+                    }
+                }
+
+                if activeFeedIsLoadingMore {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .tint(.white)
+                            .padding(.vertical, 16)
+                        Spacer()
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
+        }
+        .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top) {
             HStack(spacing: 14) {
-                circleFeedActionButton(
-                    systemImage: "square.and.pencil",
-                    accessibilityLabel: "Create post",
-                    badgeCount: nil
-                ) {
-                    showingComposer = true
-                }
-
                 circleFeedActionButton(
                     systemImage: "bell",
                     accessibilityLabel: store.unreadNotificationsCount > 0
@@ -207,6 +182,14 @@ struct FeedView: View {
                 }
 
                 Spacer(minLength: 0)
+
+                circleFeedActionButton(
+                    systemImage: "gearshape.fill",
+                    accessibilityLabel: "Settings",
+                    badgeCount: nil
+                ) {
+                    showSettings = true
+                }
             }
             .padding(.horizontal, 12)
             .padding(.top, 2)
@@ -233,6 +216,10 @@ struct FeedView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showSettings) {
+            SettingsSheetView()
+                .environmentObject(settings)
+        }
         .sheet(isPresented: $showingNotifications) {
             NavigationStack {
                 NotificationsInboxView { notification in
@@ -247,16 +234,24 @@ struct FeedView: View {
             .presentationDragIndicator(.visible)
         }
         .refreshable {
-            switch feedScope {
-            case .hot:
-                await store.refreshHotFeed()
-            case .following:
+            switch feedFilter {
+            case .forYou:
                 await store.refreshFollowingFeed()
+            case .game(let gameID):
+                await store.refreshGameFeed(for: gameID)
             }
         }
-        .onChange(of: feedScope) { _, newValue in
-            if newValue == .following, store.followingPosts.isEmpty, !store.followingFeedIsLoading {
-                store.loadFollowingFeed()
+        .onChange(of: feedFilter) { _, newValue in
+            switch newValue {
+            case .forYou:
+                // Reload if we have no cached posts
+                if store.followingPosts.isEmpty && !store.followingFeedIsLoading {
+                    store.loadFollowingFeed()
+                }
+            case .game(let gameID):
+                if store.gameFeedPostsByGameID[gameID] == nil {
+                    store.loadGameFeed(for: gameID)
+                }
             }
         }
         .overlay(alignment: .top) {
@@ -269,11 +264,140 @@ struct FeedView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: store.reactionErrorMessage)
         .task {
-            if feedScope == .following, store.followingPosts.isEmpty, !store.followingFeedIsLoading {
+            if store.followingPosts.isEmpty && !store.followingFeedIsLoading {
                 store.loadFollowingFeed()
             }
         }
     }
+
+    // MARK: - Title Card
+
+    private var feedTitleCard: some View {
+        HStack {
+            Spacer()
+            HStack(spacing: 8) {
+                Image(systemName: "newspaper.fill")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(AppTheme.accent)
+                Text("My Patch Notes")
+                    .font(.title2.weight(.bold))
+                    .fontDesign(.rounded)
+                    .foregroundStyle(.white)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Game Channel Bar (Sleeper-style)
+
+    private var gameChannelBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 14) {
+                ForEach(store.followedGamesForPillBar) { game in
+                    let isSelected = feedFilter == .game(game.id)
+                    Button {
+                        if isSelected {
+                            feedFilter = .forYou
+                        } else {
+                            feedFilter = .game(game.id)
+                        }
+                    } label: {
+                        VStack(spacing: 6) {
+                            RemoteMediaImage(
+                                primaryURL: game.coverImageURL,
+                                fallbackURL: MediaFallback.gameCover
+                            )
+                            .frame(width: 82, height: 82)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .stroke(
+                                        isSelected
+                                            ? AppTheme.accent.opacity(0.8)
+                                            : Color.white.opacity(0.15),
+                                        lineWidth: isSelected ? 2.5 : 1
+                                    )
+                            }
+                            .shadow(
+                                color: isSelected ? AppTheme.accent.opacity(0.35) : .clear,
+                                radius: 6, y: 2
+                            )
+
+                            Text(game.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(isSelected ? .white : .white.opacity(0.65))
+                                .lineLimit(1)
+                                .frame(width: 88)
+
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    // MARK: - Empty State
+
+    @ViewBuilder
+    private var emptyStateView: some View {
+        if case .game = feedFilter {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("No posts in \(activeGameTitle ?? "this game") yet")
+                        .font(.headline.weight(.bold))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(.white)
+                    Text("Check back soon for updates and discussions.")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+            }
+        } else {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Your feed is empty")
+                        .font(.headline.weight(.bold))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(.white)
+                    Text("Follow some games to see posts in your feed.")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.72))
+
+                    HStack(spacing: 10) {
+                        NavigationLink {
+                            ReleaseCalendarView()
+                        } label: {
+                            Text("Browse Calendar")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(AppTheme.accent.opacity(0.28), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            MyGamesView()
+                        } label: {
+                            Text("My Games")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.white.opacity(0.12), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.top, 4)
+                }
+            }
+        }
+    }
+
+    // MARK: - Helpers
 
     private func shouldLoadMore(for post: Post) -> Bool {
         guard activeFeedHasMore, !activeFeedIsLoadingMore else { return false }
@@ -283,9 +407,11 @@ struct FeedView: View {
     }
 
     private func loadMoreForActiveScope() {
-        switch feedScope {
-        case .hot: store.loadMoreHotFeed()
-        case .following: store.loadMoreFollowingFeed()
+        switch feedFilter {
+        case .forYou:
+            store.loadMoreFollowingFeed()
+        case .game(let gameID):
+            store.loadMoreGameFeed(for: gameID)
         }
     }
 

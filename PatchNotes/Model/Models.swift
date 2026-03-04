@@ -3,7 +3,6 @@ import Foundation
 enum AppTab: Hashable {
     case home
     case releaseCalendar
-    case social
     case myGames
     case esports
 }

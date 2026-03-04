@@ -4,7 +4,6 @@ struct FeedPostRow: View {
     let post: Post
     let authorProfile: PublicProfile?
     let linkedGame: Game?
-    let badgeGame: Game?
     let reactionCountOverride: Int
     let reactionTypes: [ReactionType]
     let reactionCounts: [PostReactionCount]
@@ -12,68 +11,99 @@ struct FeedPostRow: View {
     let onReact: (UUID) -> Void
     let onOpenPostDetail: (() -> Void)?
     let onOpenComments: () -> Void
+    let onGameTap: ((Game.ID) -> Void)?
+    var authorFavoriteGames: [FavoriteGameBadge] = []
+
+    @State private var showingReactionPicker = false
 
     var body: some View {
-        let badgeKey = primaryBadgeKey
-        let badgeTitle = badgeGameTitle
-        let badgeAlias = badgeCompactAlias
+        VStack(alignment: .leading, spacing: 10) {
+            // MARK: - Header: Game icon + info + Share
+            HStack(alignment: .top, spacing: 12) {
+                if let linkedGame {
+                    Button {
+                        onGameTap?(linkedGame.id)
+                    } label: {
+                        RemoteMediaImage(
+                            primaryURL: linkedGame.coverImageURL,
+                            fallbackURL: MediaFallback.gameCover
+                        )
+                        .frame(width: 76, height: 76)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
 
-        VStack(alignment: .leading, spacing: 8) {
-            if let authorText = authorDisplayName {
-                Text(authorText)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.65))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        onOpenComments()
+                VStack(alignment: .leading, spacing: 3) {
+                    if let linkedGame {
+                        Button {
+                            onGameTap?(linkedGame.id)
+                        } label: {
+                            Text(linkedGame.title)
+                                .font(.callout.weight(.bold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
                     }
-            }
-            if post.isExternalSource {
-                PostSourceMetaRow(post: post)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if let title = post.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        onOpenComments()
-                    }
-            } else {
-                Text(post.fallbackHeadlineText)
-                    .font(.headline)
-                    .foregroundStyle(.white.opacity(0.92))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        onOpenComments()
-                    }
-            }
 
-            if let linkedGame {
-                NavigationLink {
-                    GameReleaseDetailView(game: linkedGame)
+                    authorRow
+
+                    Text(compactRelativeTimestamp(post.created_at))
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+
+                Spacer(minLength: 4)
+
+                Button {
+                    sharePost()
                 } label: {
-                    GameContextChip(game: linkedGame)
+                    VStack(spacing: 3) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 18, weight: .semibold))
+                        Text("Share")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.50))
+                    .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
             }
 
+            // MARK: - Title
+            if let title = post.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+                Text(title)
+                    .font(.headline.weight(.bold))
+                    .fontDesign(.rounded)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpenComments() }
+            }
+
+            // MARK: - External source meta
+            if post.isExternalSource {
+                PostSourceMetaRow(post: post)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // MARK: - Body text
             if let body = post.body?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty {
                 Text(body)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white.opacity(0.72))
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
-                    .onTapGesture {
-                        onOpenComments()
-                    }
+                    .onTapGesture { onOpenComments() }
             }
 
+            // MARK: - Media preview
             PostMediaPreview(post: post, height: 190, onVideoTap: onOpenPostDetail)
                 .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .simultaneousGesture(
@@ -83,107 +113,196 @@ struct FeedPostRow: View {
                     }
                 )
 
-            if !reactionTypes.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(reactionTypes) { type in
-                            let count = reactionCounts.first(where: { $0.reactionTypeID == type.id })?.count ?? 0
-                            let isSelected = selectedReactionTypeIDs.contains(type.id)
-
+            // MARK: - Sleeper-style reaction bar + comments
+            HStack(spacing: 0) {
+                // Top 5 reactions (large emoji + count below)
+                if !reactionTypes.isEmpty {
+                    HStack(spacing: 12) {
+                        ForEach(topReactions.prefix(4), id: \.type.id) { item in
                             Button {
-                                onReact(type.id)
+                                onReact(item.type.id)
                             } label: {
-                                HStack(spacing: 4) {
-                                    Text(type.emoji)
-                                    Text("\(count)")
-                                        .font(.caption.weight(.semibold))
-                                }
-                                .foregroundStyle(.white.opacity(isSelected ? 0.96 : 0.78))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 5)
-                                .background(
-                                    (isSelected ? AppTheme.accent.opacity(0.22) : Color.white.opacity(0.06)),
-                                    in: Capsule()
-                                )
-                                .overlay {
-                                    Capsule()
-                                        .stroke(
-                                            isSelected ? AppTheme.accent.opacity(0.45) : Color.white.opacity(0.08),
-                                            lineWidth: 1
+                                VStack(spacing: 2) {
+                                    Text(item.type.emoji)
+                                        .font(.title2)
+                                    Text(compactCount(item.count))
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(
+                                            item.isSelected ? .white : .white.opacity(0.55)
                                         )
                                 }
+                                .frame(minWidth: 36)
+                                .opacity(item.isSelected ? 1.0 : 0.85)
                             }
-                            .buttonStyle(.borderless)
+                            .buttonStyle(.plain)
+                        }
+
+                        // Reaction picker button
+                        Button {
+                            showingReactionPicker = true
+                        } label: {
+                            VStack(spacing: 2) {
+                                Image(systemName: "face.smiling")
+                                    .font(.title2)
+                                Text("+")
+                                    .font(.caption2.weight(.bold))
+                            }
+                            .foregroundStyle(.white.opacity(0.40))
+                            .frame(minWidth: 36)
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showingReactionPicker) {
+                            reactionPickerGrid
                         }
                     }
-                    .padding(.vertical, 2)
                 }
-            }
 
-            HStack(spacing: 12) {
-                Label("\(reactionCountOverride)", systemImage: "face.smiling")
+                Spacer(minLength: 8)
+
+                // Comments button with count
                 Button {
                     onOpenComments()
                 } label: {
-                    Label("\(post.comment_count ?? 0)", systemImage: "bubble.right")
+                    VStack(spacing: 2) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bubble.left.and.bubble.right.fill")
+                                .font(.system(size: 20, weight: .semibold))
+                            if let count = post.comment_count, count > 0 {
+                                Text(compactCount(count))
+                                    .font(.subheadline.weight(.bold))
+                            }
+                        }
+                        Text("Comments")
+                            .font(.caption2.weight(.bold))
+                    }
+                    .foregroundStyle(.white.opacity(0.55))
+                    .frame(minWidth: 48)
                 }
                 .buttonStyle(.plain)
-                if let hotScore = post.hot_score {
-                    Label(String(format: "%.1f", hotScore), systemImage: "flame.fill")
-                }
-                Spacer()
-                Text(compactRelativeTimestamp(post.created_at))
             }
-            .font(.caption)
-            .foregroundStyle(.white.opacity(0.55))
-
-            Button {
-                onOpenComments()
-            } label: {
-                Text((post.comment_count ?? 0) > 0 ? "View Comments" : "Add Comment")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppTheme.accent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(AppTheme.accent.opacity(0.12), in: Capsule())
-            }
-            .buttonStyle(.plain)
+            .padding(.top, 2)
         }
-        .padding(14)
+        .padding(16)
         .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: [Color.white.opacity(0.06), Color.white.opacity(0.03)],
+                        colors: [AppTheme.surfaceTop.opacity(0.96), AppTheme.surfaceBottom.opacity(0.98)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.11), lineWidth: 1)
         }
-        .overlay(alignment: .topTrailing) {
-            cornerBadgeOverlay(key: badgeKey, gameTitle: badgeTitle, gameCompactAlias: badgeAlias)
+        .shadow(color: .black.opacity(0.35), radius: 14, y: 7)
+    }
+
+    // MARK: - Reaction Picker
+
+    private var reactionPickerGrid: some View {
+        VStack(spacing: 12) {
+            Text("React")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.white)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 12) {
+                ForEach(reactionTypes) { type in
+                    let isSelected = selectedReactionTypeIDs.contains(type.id)
+                    Button {
+                        onReact(type.id)
+                        showingReactionPicker = false
+                    } label: {
+                        Text(type.emoji)
+                            .font(.title)
+                            .frame(width: 44, height: 44)
+                            .background(
+                                isSelected
+                                    ? AppTheme.accent.opacity(0.25)
+                                    : Color.white.opacity(0.06),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(
+                                        isSelected ? AppTheme.accent.opacity(0.5) : Color.white.opacity(0.1),
+                                        lineWidth: 1
+                                    )
+                            }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 240)
+        .background(AppTheme.surfaceTop)
+        .presentationCompactAdaptation(.popover)
+    }
+
+    // MARK: - Author Row
+
+    @ViewBuilder
+    private var authorRow: some View {
+        if let authorText = authorDisplayName {
+            HStack(spacing: 4) {
+                Image(systemName: "seal.fill")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.accent)
+                Text(authorText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(1)
+            }
         }
     }
 
-    @ViewBuilder
-    private func cornerBadgeOverlay(
-        key: FeedBadgeKey,
-        gameTitle: String?,
-        gameCompactAlias: String?
-    ) -> some View {
-        FeedPostCornerBadgeView(
-            key: key,
-            gameTitle: gameTitle,
-            gameCompactAlias: gameCompactAlias
-        )
-        .allowsHitTesting(false)
-        .padding(.trailing, 10)
-        .padding(.top, 8)
+    // MARK: - Reaction Helpers
+
+    private struct ReactionItem {
+        let type: ReactionType
+        let count: Int
+        let isSelected: Bool
     }
+
+    private var topReactions: [ReactionItem] {
+        reactionTypes.map { type in
+            let count = reactionCounts.first(where: { $0.reactionTypeID == type.id })?.count ?? 0
+            let isSelected = selectedReactionTypeIDs.contains(type.id)
+            return ReactionItem(type: type, count: count, isSelected: isSelected)
+        }
+    }
+
+    private func compactCount(_ value: Int) -> String {
+        if value >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        } else if value >= 1_000 {
+            return String(format: "%.1fk", Double(value) / 1_000)
+        }
+        return "\(value)"
+    }
+
+    // MARK: - Share
+
+    private func sharePost() {
+        let title = post.title ?? "Check out this post on Patch Notes"
+        let activityVC = UIActivityViewController(
+            activityItems: [title],
+            applicationActivities: nil
+        )
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let rootVC = windowScene.windows.first?.rootViewController {
+            var topVC = rootVC
+            while let presented = topVC.presentedViewController {
+                topVC = presented
+            }
+            activityVC.popoverPresentationController?.sourceView = topVC.view
+            topVC.present(activityVC, animated: true)
+        }
+    }
+
+    // MARK: - Helpers
 
     private var authorDisplayName: String? {
         guard let authorProfile else { return nil }
@@ -191,64 +310,7 @@ struct FeedPostRow: View {
            !displayName.isEmpty {
             return displayName
         }
-        return "u/\(authorProfile.username)"
-    }
-
-    private var primaryBadgeKey: FeedBadgeKey {
-        if let rawBadgeKey = post.primaryBadgeKeyRaw {
-            let parsed = FeedBadgeKey(rawValue: rawBadgeKey)
-            if parsed.category != .unspecified || rawBadgeKey == FeedBadgeCategory.unspecified.rawValue {
-                return parsed
-            }
-            // Invalid server value: continue to local fallback instead of rendering as unspecified.
-        }
-        if let linkedGame {
-            return FeedBadgeKey(gameID: linkedGame.id.uuidString.lowercased())
-        }
-        if let gameID = post.gameID {
-            return FeedBadgeKey(gameID: gameID.uuidString.lowercased())
-        }
-        return FeedBadgeKey(category: .generalGaming)
-    }
-
-    private var badgeGameTitle: String? {
-        guard primaryBadgeKey.isGame else { return nil }
-        if let badgeGame {
-            return badgeGame.title
-        }
-        if post.gameID != nil {
-            return "Game"
-        }
-        return nil
-    }
-
-    private var badgeCompactAlias: String? {
-        guard primaryBadgeKey.isGame else { return nil }
-        if let title = badgeGame?.title {
-            return compactGameBadgeAlias(from: title)
-        }
-        if post.gameID != nil {
-            return "GAME"
-        }
-        return nil
-    }
-
-    private func compactGameBadgeAlias(from title: String) -> String {
-        let parts = title
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-
-        if parts.count >= 2 {
-            let initials = parts
-                .prefix(4)
-                .compactMap(\.first)
-            let alias = String(initials).uppercased()
-            if !alias.isEmpty {
-                return alias
-            }
-        }
-
-        return String(title.prefix(4)).uppercased()
+        return authorProfile.username
     }
 }
 
@@ -364,14 +426,14 @@ struct PostSourceMetaRow: View {
             post: post,
             authorProfile: PreviewHelpers.makeProfile(),
             linkedGame: PreviewHelpers.makeGame(),
-            badgeGame: nil,
             reactionCountOverride: 12,
             reactionTypes: reactions,
             reactionCounts: counts,
             selectedReactionTypeIDs: [],
             onReact: { _ in },
             onOpenPostDetail: nil,
-            onOpenComments: {}
+            onOpenComments: {},
+            onGameTap: nil
         )
         .padding()
     }
@@ -385,14 +447,14 @@ struct PostSourceMetaRow: View {
             post: post,
             authorProfile: PreviewHelpers.makeProfile(),
             linkedGame: nil,
-            badgeGame: nil,
             reactionCountOverride: 5,
             reactionTypes: PreviewHelpers.makeReactionTypes(),
             reactionCounts: [],
             selectedReactionTypeIDs: [],
             onReact: { _ in },
             onOpenPostDetail: nil,
-            onOpenComments: {}
+            onOpenComments: {},
+            onGameTap: nil
         )
         .padding()
     }
@@ -406,14 +468,14 @@ struct PostSourceMetaRow: View {
             post: post,
             authorProfile: PreviewHelpers.makeProfile(),
             linkedGame: nil,
-            badgeGame: nil,
             reactionCountOverride: 3,
             reactionTypes: PreviewHelpers.makeReactionTypes(),
             reactionCounts: [],
             selectedReactionTypeIDs: [],
             onReact: { _ in },
             onOpenPostDetail: nil,
-            onOpenComments: {}
+            onOpenComments: {},
+            onGameTap: nil
         )
         .padding()
     }
