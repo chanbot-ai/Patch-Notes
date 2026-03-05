@@ -86,9 +86,9 @@ enum PreviewHelpers {
 
     static func makeReactionTypes() -> [ReactionType] {
         [
-            ReactionType(id: reactionTypeIDs.fire, slug: "fire", display_name: "Fire", emoji: "\u{1F525}"),
-            ReactionType(id: reactionTypeIDs.hype, slug: "hype", display_name: "Hype", emoji: "\u{26A1}"),
-            ReactionType(id: reactionTypeIDs.mindBlown, slug: "mind_blown", display_name: "Mind Blown", emoji: "\u{1F92F}")
+            ReactionType(id: reactionTypeIDs.fire, slug: "fire", display_name: "Fire", emoji: "\u{1F525}", category: "core", sort_order: 5),
+            ReactionType(id: reactionTypeIDs.hype, slug: "lightning", display_name: "Lightning", emoji: "\u{26A1}", category: "hype", sort_order: 7),
+            ReactionType(id: reactionTypeIDs.mindBlown, slug: "mind_blown", display_name: "Mind Blown", emoji: "\u{1F92F}", category: "core", sort_order: 10)
         ]
     }
 
@@ -113,7 +113,8 @@ enum PreviewHelpers {
             username: username,
             display_name: displayName,
             avatar_url: nil,
-            created_at: Date(timeIntervalSinceReferenceDate: 750_000_000)
+            created_at: Date(timeIntervalSinceReferenceDate: 750_000_000),
+            is_bot: false
         )
     }
 

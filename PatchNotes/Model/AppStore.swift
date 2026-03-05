@@ -61,6 +61,11 @@ final class AppStore: ObservableObject {
     @Published private(set) var leagueStandings: [String: [LeagueStanding]]
     @Published private(set) var favoriteTeams: Set<String>
     @Published private(set) var isLoadingEsports: Bool
+    @Published private(set) var steamProfile: SteamProfile?
+    @Published private(set) var steamOwnedGames: [SteamOwnedGame]
+    @Published private(set) var steamSyncIsLoading: Bool
+    @Published private(set) var steamSyncErrorMessage: String?
+    @Published private(set) var gameCommunityHealthByGameID: [Game.ID: GameCommunityHealth]
 
     private var threadsByGame: [Game.ID: [ThreadPost]]
     private let calendar = Calendar.current
@@ -141,6 +146,11 @@ final class AppStore: ObservableObject {
         let storedFavorites = UserDefaults.standard.stringArray(forKey: "pn.esports.favoriteTeams") ?? []
         self.favoriteTeams = Set(storedFavorites)
         self.isLoadingEsports = false
+        self.steamProfile = nil
+        self.steamOwnedGames = []
+        self.steamSyncIsLoading = false
+        self.steamSyncErrorMessage = nil
+        self.gameCommunityHealthByGameID = [:]
         self.threadsByGame = [:]
         self.commentOffsetsByPost = [:]
         self.inFlightPostRefreshIDs = []
@@ -502,7 +512,98 @@ final class AppStore: ObservableObject {
             gameFeedHasMoreByGameID = [:]
             gameFeedIsLoadingMoreByGameID = [:]
             gameFeedCursorByGameID = [:]
+            steamProfile = nil
+            steamOwnedGames = []
+            steamSyncIsLoading = false
+            steamSyncErrorMessage = nil
+            gameCommunityHealthByGameID = [:]
         }
+    }
+
+    // MARK: - Steam Integration
+
+    /// Computed library: prefer Steam games if synced, else fall back to seed data
+    var libraryGames: [Game] {
+        if !steamOwnedGames.isEmpty {
+            return steamOwnedGames.map { sg in
+                if let gameID = sg.game_id, let catalogGame = gameCatalogByID[gameID] {
+                    return catalogGame
+                }
+                return Game(
+                    id: sg.game_id ?? stableSteamFallbackID(appID: sg.steam_app_id),
+                    title: sg.game_title ?? sg.name,
+                    publisher: "Unknown Studio",
+                    genre: "Steam",
+                    releaseDate: Date(),
+                    similarTitles: [],
+                    reviewScores: [],
+                    isOwned: true,
+                    coverImageURL: sg.coverImageURL,
+                    screenshotURLs: []
+                )
+            }
+        }
+        return ownedGames
+    }
+
+    func loadSteamLibrary() {
+        Task { await refreshSteamLibrary() }
+    }
+
+    func syncSteamLibrary(identifier: String) {
+        Task { await syncSteamLibraryNow(identifier: identifier) }
+    }
+
+    func communityHealth(for gameID: Game.ID) -> GameCommunityHealth? {
+        gameCommunityHealthByGameID[gameID]
+    }
+
+    func refreshGameCommunityHealth(for gameID: Game.ID) {
+        Task {
+            do {
+                if let health = try await feedService.fetchGameCommunityHealth(gameID: gameID) {
+                    gameCommunityHealthByGameID[gameID] = health
+                }
+            } catch {
+                print("Community health fetch error:", error.localizedDescription)
+            }
+        }
+    }
+
+    private func refreshSteamLibrary() async {
+        guard let session = authenticatedSession else { return }
+        do {
+            async let profileTask = feedService.fetchSteamProfile(accessToken: session.accessToken)
+            async let gamesTask = feedService.fetchMySteamOwnedGames(accessToken: session.accessToken)
+            let (profile, games) = try await (profileTask, gamesTask)
+            steamProfile = profile
+            steamOwnedGames = games
+        } catch {
+            print("Steam library refresh error:", error.localizedDescription)
+        }
+    }
+
+    private func syncSteamLibraryNow(identifier: String) async {
+        guard let session = authenticatedSession else { return }
+        steamSyncIsLoading = true
+        steamSyncErrorMessage = nil
+        do {
+            let isNumericID = identifier.count >= 17 && identifier.allSatisfy(\.isNumber)
+            let _ = try await feedService.syncSteamLibrary(
+                steamID: isNumericID ? identifier : nil,
+                vanityName: isNumericID ? nil : identifier,
+                accessToken: session.accessToken
+            )
+            await refreshSteamLibrary()
+        } catch {
+            steamSyncErrorMessage = error.localizedDescription
+        }
+        steamSyncIsLoading = false
+    }
+
+    private func stableSteamFallbackID(appID: Int) -> UUID {
+        let padded = String(format: "%012d", appID)
+        return UUID(uuidString: "00000000-0000-0000-0000-\(padded)") ?? UUID()
     }
 
     func loadReactionTypes() {

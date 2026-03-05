@@ -476,6 +476,18 @@ struct CommentRowCard: View {
     let onReact: (UUID) -> Void
     let onReply: (() -> Void)?
 
+    @State private var showingCommentReactionPicker = false
+
+    private var activeCommentReactions: [(type: ReactionType, count: Int)] {
+        reactionCounts.compactMap { rc in
+            guard let type = reactionTypes.first(where: { $0.id == rc.reactionTypeID }), rc.count > 0 else { return nil }
+            return (type: type, count: rc.count)
+        }
+        .sorted { $0.count > $1.count }
+        .prefix(5)
+        .map { $0 }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             // Header: author + badges + timestamp + Reply
@@ -535,16 +547,16 @@ struct CommentRowCard: View {
             // Inline reactions (compact row)
             if !reactionTypes.isEmpty {
                 HStack(spacing: 4) {
-                    ForEach(reactionTypes.prefix(4)) { type in
-                        let count = reactionCounts.first(where: { $0.reactionTypeID == type.id })?.count ?? 0
-                        let isSelected = selectedReactionTypeIDs.contains(type.id)
+                    // Show reactions that have counts
+                    ForEach(activeCommentReactions, id: \.type.id) { item in
+                        let isSelected = selectedReactionTypeIDs.contains(item.type.id)
                         Button {
-                            onReact(type.id)
+                            onReact(item.type.id)
                         } label: {
                             HStack(spacing: 2) {
-                                Text(type.emoji)
+                                Text(item.type.emoji)
                                     .font(.caption2)
-                                Text("\(count)")
+                                Text("\(item.count)")
                                     .font(.caption2.weight(.semibold))
                             }
                             .foregroundStyle(.white.opacity(isSelected ? 0.96 : 0.50))
@@ -558,9 +570,27 @@ struct CommentRowCard: View {
                         .buttonStyle(.plain)
                     }
 
-                    Image(systemName: "face.smiling")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.25))
+                    // Add reaction button
+                    Button {
+                        showingCommentReactionPicker = true
+                    } label: {
+                        Image(systemName: "face.smiling")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.35))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showingCommentReactionPicker) {
+                        ReactionPickerSheet(
+                            reactionTypes: reactionTypes,
+                            selectedReactionTypeIDs: selectedReactionTypeIDs,
+                            onReact: { typeID in
+                                onReact(typeID)
+                                showingCommentReactionPicker = false
+                            }
+                        )
+                    }
                 }
             }
         }

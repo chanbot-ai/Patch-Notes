@@ -6,6 +6,9 @@ struct PublicProfile: Identifiable, Decodable, Equatable {
     let display_name: String?
     let avatar_url: String?
     let created_at: Date
+    let is_bot: Bool?
+
+    var isBot: Bool { is_bot ?? false }
 }
 
 struct FavoriteGameBadge: Identifiable, Equatable {

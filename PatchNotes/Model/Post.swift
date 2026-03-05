@@ -115,7 +115,8 @@ struct Post: Identifiable, Decodable {
             username: author_username,
             display_name: author_display_name,
             avatar_url: author_avatar_url,
-            created_at: author_created_at
+            created_at: author_created_at,
+            is_bot: nil
         )
     }
 
@@ -174,6 +175,38 @@ struct ReactionType: Identifiable, Decodable, Equatable {
     let slug: String
     let display_name: String?
     let emoji: String
+    let category: String?
+    let sort_order: Int?
+}
+
+enum ReactionCategory: String, CaseIterable, Identifiable {
+    case core, hype, fail, watching, gaming, memes, social
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .core: return "Core"
+        case .hype: return "Hype"
+        case .fail: return "Fail / Salt"
+        case .watching: return "Watching"
+        case .gaming: return "Gaming"
+        case .memes: return "Memes"
+        case .social: return "Social"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .core: return "😂"
+        case .hype: return "🚀"
+        case .fail: return "💀"
+        case .watching: return "👀"
+        case .gaming: return "🎮"
+        case .memes: return "🐸"
+        case .social: return "❤️"
+        }
+    }
 }
 
 struct PostReactionCount: Identifiable, Decodable, Equatable {
@@ -213,7 +246,8 @@ struct Comment: Identifiable, Decodable, Equatable {
             username: author_username,
             display_name: author_display_name,
             avatar_url: author_avatar_url,
-            created_at: author_created_at
+            created_at: author_created_at,
+            is_bot: nil
         )
     }
 }
@@ -242,6 +276,68 @@ struct CommentReactionCount: Identifiable, Decodable, Equatable {
     var commentID: UUID { comment_id }
     var reactionTypeID: UUID { reaction_type_id }
 }
+
+// MARK: - Steam Models
+
+struct SteamProfile: Decodable, Equatable {
+    let user_id: UUID
+    let steam_id: String
+    let persona_name: String?
+    let avatar_url: String?
+    let profile_url: String?
+    let last_synced_at: Date?
+
+    var personaName: String { persona_name ?? steam_id }
+}
+
+struct SteamOwnedGame: Identifiable, Decodable, Equatable {
+    let steam_app_id: Int
+    let name: String
+    let playtime_forever_minutes: Int
+    let playtime_2weeks_minutes: Int?
+    let last_played_at: Date?
+    let cover_image_url: String?
+    let game_id: UUID?
+    let game_title: String?
+
+    var id: Int { steam_app_id }
+
+    var coverImageURL: URL? {
+        if let cover_image_url, let url = URL(string: cover_image_url) {
+            return url
+        }
+        return URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(steam_app_id)/library_600x900_2x.jpg")
+    }
+
+    var playtimeHours: Int { playtime_forever_minutes / 60 }
+}
+
+struct SteamSyncResult: Decodable {
+    let success: Bool
+    let steam_profile: SteamSyncProfile?
+    let owned_games_total: Int?
+    let matched_to_catalog: Int?
+    let newly_followed: Int?
+
+    struct SteamSyncProfile: Decodable {
+        let name: String?
+        let avatar: String?
+        let profile_url: String?
+    }
+}
+
+struct GameCommunityHealth: Decodable {
+    let game_id: UUID
+    let game_title: String?
+    let total_posts: Int
+    let recent_posts: Int
+    let total_comments: Int
+    let unique_authors: Int
+    let is_quiet: Bool
+    let quiet_message: String?
+}
+
+// MARK: - Notifications
 
 struct AppNotification: Identifiable, Decodable, Equatable {
     let id: UUID

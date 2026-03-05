@@ -4,6 +4,7 @@ struct MyGamesView: View {
     @EnvironmentObject private var store: AppStore
 
     @State private var showingGameBrowser = false
+    @State private var steamIdentifier = ""
 
     private let columns = [
         GridItem(.flexible(), spacing: 14, alignment: .top),
@@ -49,6 +50,9 @@ struct MyGamesView: View {
         .task {
             if store.followedGameIDs.isEmpty && !store.followedGamesIsLoading && store.followedGamesErrorMessage == nil {
                 store.loadFollowedGames()
+            }
+            if store.steamOwnedGames.isEmpty && store.steamProfile == nil {
+                store.loadSteamLibrary()
             }
         }
     }
@@ -175,12 +179,14 @@ struct MyGamesView: View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(
                 title: "Your Library",
-                subtitle: "Steam auth comes next. For now this is a realistic synced preview of your game shelf."
+                subtitle: "Connect your Steam account to sync your game shelf automatically."
             )
+
+            steamConnectionCard
 
             GlassCard {
                 LazyVGrid(columns: columns, spacing: 14) {
-                    ForEach(store.ownedGames) { game in
+                    ForEach(store.libraryGames) { game in
                         NavigationLink {
                             GameReleaseDetailView(game: game)
                         } label: {
@@ -193,6 +199,95 @@ struct MyGamesView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Open \(game.title)")
                     }
+                }
+            }
+        }
+    }
+
+    // MARK: - Steam Connection Card
+
+    private var steamConnectionCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "gamecontroller.fill")
+                        .font(.title3)
+                        .foregroundStyle(AppTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Steam")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(.white)
+                        if let profile = store.steamProfile {
+                            Text("Connected as \(profile.personaName)")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.green.opacity(0.85))
+                        } else {
+                            Text("Not connected")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                    }
+                    Spacer()
+                    if store.steamSyncIsLoading {
+                        ProgressView()
+                            .scaleEffect(0.85)
+                            .tint(.white.opacity(0.9))
+                    }
+                }
+
+                if store.steamProfile == nil {
+                    HStack(spacing: 8) {
+                        TextField("Steam ID or vanity name", text: $steamIdentifier)
+                            .textFieldStyle(.plain)
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                            }
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+
+                        Button {
+                            guard !steamIdentifier.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                            store.syncSteamLibrary(identifier: steamIdentifier.trimmingCharacters(in: .whitespaces))
+                        } label: {
+                            Text("Sync")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(AppTheme.accent.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(store.steamSyncIsLoading || steamIdentifier.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                } else {
+                    Button {
+                        store.syncSteamLibrary(identifier: store.steamProfile?.steam_id ?? "")
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                            Text("Re-sync")
+                        }
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(AppTheme.accent.opacity(0.28), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(store.steamSyncIsLoading)
+                }
+
+                if let error = store.steamSyncErrorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red.opacity(0.85))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
