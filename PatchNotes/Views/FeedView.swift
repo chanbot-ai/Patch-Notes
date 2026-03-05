@@ -341,9 +341,14 @@ struct FeedView: View {
 
     // MARK: - Empty State
 
+    private var activeGameID: Game.ID? {
+        if case .game(let gameID) = feedFilter { return gameID }
+        return nil
+    }
+
     @ViewBuilder
     private var emptyStateView: some View {
-        if case .game = feedFilter {
+        if case .game(let gameID) = feedFilter {
             GlassCard {
                 VStack(spacing: 16) {
                     Image(systemName: "newspaper")
@@ -355,27 +360,56 @@ struct FeedView: View {
                             .font(.headline.weight(.bold))
                             .fontDesign(.rounded)
                             .foregroundStyle(.white)
-                        Text("When news drops for \(activeGameTitle ?? "this game"), it'll show up here and in your home feed since you follow this community.")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.65))
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
+
+                        if let healthMessage = store.communityHealth(for: gameID)?.quiet_message {
+                            Text(healthMessage)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.65))
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            Text("When news drops for \(activeGameTitle ?? "this game"), it'll show up here and in your home feed since you follow this community.")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.65))
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
 
-                    Button {
-                        feedFilter = .forYou
-                    } label: {
-                        Text("Back to For You")
+                    HStack(spacing: 12) {
+                        Button {
+                            store.loadGameFeed(for: gameID)
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.clockwise")
+                                Text("Refresh")
+                            }
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
-                            .background(AppTheme.accent.opacity(0.28), in: Capsule())
+                            .background(Color.white.opacity(0.12), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            feedFilter = .forYou
+                        } label: {
+                            Text("Back to For You")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(AppTheme.accent.opacity(0.28), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
+            }
+            .onAppear {
+                store.refreshGameCommunityHealth(for: gameID)
             }
         } else {
             GlassCard {

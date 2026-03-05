@@ -912,6 +912,83 @@ final class FeedService {
         return try JSONDecoder().decode([FavoriteGameRow].self, from: response.data)
     }
 
+    // MARK: - Steam Integration
+
+    private struct SteamLibrarySyncPayload: Encodable {
+        let steamId: String?
+        let vanityName: String?
+    }
+
+    private struct FetchSteamOwnedGamesParams: Encodable {
+        let p_limit: Int
+    }
+
+    private struct GameCommunityHealthParams: Encodable {
+        let p_game_id: String
+    }
+
+    func syncSteamLibrary(
+        steamID: String? = nil,
+        vanityName: String? = nil,
+        accessToken: String
+    ) async throws -> SteamSyncResult {
+        let payload = SteamLibrarySyncPayload(
+            steamId: steamID,
+            vanityName: vanityName
+        )
+        let baseURL = SupabaseManager.projectURL
+        let url = baseURL.appendingPathComponent("functions/v1/syncSteamLibrary")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(SupabaseManager.anonKey, forHTTPHeaderField: "apikey")
+        request.httpBody = try JSONEncoder().encode(payload)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw NSError(domain: "SteamSync", code: -1, userInfo: [NSLocalizedDescriptionKey: errorBody])
+        }
+        return try JSONDecoder().decode(SteamSyncResult.self, from: data)
+    }
+
+    func fetchSteamProfile(accessToken: String) async throws -> SteamProfile? {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        let response = try await client
+            .from("user_steam_profiles")
+            .select("user_id,steam_id,persona_name,avatar_url,profile_url,last_synced_at")
+            .limit(1)
+            .execute()
+
+        let profiles = try makeDatabaseDecoder().decode([SteamProfile].self, from: response.data)
+        return profiles.first
+    }
+
+    func fetchMySteamOwnedGames(
+        accessToken: String,
+        limit: Int = 200
+    ) async throws -> [SteamOwnedGame] {
+        let client = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        let params = FetchSteamOwnedGamesParams(p_limit: limit)
+        let response = try await client
+            .rpc("fetch_my_steam_owned_games", params: params)
+            .execute()
+
+        return try makeDatabaseDecoder().decode([SteamOwnedGame].self, from: response.data)
+    }
+
+    func fetchGameCommunityHealth(gameID: UUID) async throws -> GameCommunityHealth? {
+        let params = GameCommunityHealthParams(p_game_id: gameID.uuidString)
+        let response = try await client
+            .rpc("fetch_game_community_health", params: params)
+            .execute()
+
+        let results = try makeDatabaseDecoder().decode([GameCommunityHealth].self, from: response.data)
+        return results.first
+    }
+
     private func makeDatabaseDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
