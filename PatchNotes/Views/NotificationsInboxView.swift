@@ -64,11 +64,7 @@ struct NotificationsInboxView: View {
                                 Button {
                                     store.markNotificationRead(notification.id)
                                     if notification.postID != nil {
-                                        dismiss()
-                                        Task { @MainActor in
-                                            try? await Task.sleep(nanoseconds: 250_000_000)
-                                            onOpenNotificationPost(notification)
-                                        }
+                                        onOpenNotificationPost(notification)
                                     }
                                 } label: {
                                     NotificationRow(
@@ -248,6 +244,9 @@ private struct NotificationRow: View {
     }
 
     private var notificationMessageText: String {
+        if notification.type.hasPrefix("badge_unlock:") {
+            return notification.bodyText
+        }
         if let actorProfile {
             let actorName = actorProfile.display_name?.trimmingCharacters(in: .whitespacesAndNewlines)
             let actor = (actorName?.isEmpty == false ? actorName! : actorProfile.username)

@@ -5,10 +5,14 @@ struct PostCommentsDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     let post: Post
+    var highlightCommentID: UUID? = nil
 
     @State private var draftComment = ""
     @State private var replyingToRootCommentID: UUID?
+    @State private var replyToSpecificCommentID: UUID?
     @State private var expandedReplyParentIDs: Set<UUID> = []
+    @State private var hasScrolledToHighlight = false
+    @FocusState private var isCommentFocused: Bool
 
     private var comments: [Comment] {
         store.comments(for: post.id)
@@ -82,6 +86,7 @@ struct PostCommentsDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ScrollViewReader { scrollProxy in
             List {
                 postHeader
                     .listRowSeparator(.hidden)
@@ -139,13 +144,16 @@ struct PostCommentsDetailView: View {
                             reactionCounts: store.commentReactionCounts(for: comment.id),
                             selectedReactionTypeIDs: store.viewerCommentReactionTypeIDsByComment[comment.id] ?? [],
                             reactionTotalOverride: store.commentReactionTotal(for: comment),
-                            authorFavoriteGames: store.favoriteGames(for: comment.userID),
+                            authorDisplayBadges: store.displayBadges(for: comment.userID),
                             onReact: { reactionTypeID in
                                 store.reactToComment(comment.id, reactionTypeId: reactionTypeID)
                             },
                             onReply: {
                                 replyingToRootCommentID = comment.id
-                            }
+                                replyToSpecificCommentID = nil
+                            },
+                            currentUserID: store.authenticatedUserID,
+                            currentUserAvatarEmoji: store.currentUserAvatarEmoji
                         )
 
                         if !replies.isEmpty {
@@ -194,13 +202,16 @@ struct PostCommentsDetailView: View {
                                                 reactionCounts: store.commentReactionCounts(for: reply.id),
                                                 selectedReactionTypeIDs: store.viewerCommentReactionTypeIDsByComment[reply.id] ?? [],
                                                 reactionTotalOverride: store.commentReactionTotal(for: reply),
-                                                authorFavoriteGames: store.favoriteGames(for: reply.userID),
+                                                authorDisplayBadges: store.displayBadges(for: reply.userID),
                                                 onReact: { reactionTypeID in
                                                     store.reactToComment(reply.id, reactionTypeId: reactionTypeID)
                                                 },
                                                 onReply: {
                                                     replyingToRootCommentID = comment.id
-                                                }
+                                                    replyToSpecificCommentID = reply.id
+                                                },
+                                                currentUserID: store.authenticatedUserID,
+                                                currentUserAvatarEmoji: store.currentUserAvatarEmoji
                                             )
                                         }
                                         .padding(.leading, 16)
@@ -214,6 +225,7 @@ struct PostCommentsDetailView: View {
                             .overlay(Color.white.opacity(0.06))
                             .padding(.top, 3)
                     }
+                    .id(comment.id)
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
                 }
@@ -247,6 +259,10 @@ struct PostCommentsDetailView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Color.clear)
+            .onChange(of: comments.count) { _, _ in
+                scrollToHighlightIfNeeded(proxy: scrollProxy)
+            }
+            } // ScrollViewReader
 
             commentComposer
                 .background(.ultraThinMaterial)
@@ -273,6 +289,41 @@ struct PostCommentsDetailView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: store.reactionErrorMessage)
+        .overlay(alignment: .top) {
+            if let badge = store.newlyUnlockedBadge {
+                HStack(spacing: 10) {
+                    Text(badge.emoji)
+                        .font(.title2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Badge Unlocked!")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.7))
+                        Text(badge.label)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(AppTheme.accent.opacity(0.4), lineWidth: 1)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: store.newlyUnlockedBadge?.slug)
+        .onAppear {
+            if highlightCommentID == nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isCommentFocused = true
+                }
+            }
+        }
     }
 
     private var postHeader: some View {
@@ -302,27 +353,18 @@ struct PostCommentsDetailView: View {
 
                     if let authorProfile = store.publicProfile(for: post.authorID) {
                         HStack(spacing: 5) {
-                            Image(systemName: "seal.fill")
-                                .font(.caption)
-                                .foregroundStyle(AppTheme.accent)
+                            Text(authorProfile.avatarEmoji)
+                                .font(.system(size: 14))
                             Text(authorDisplayName(for: authorProfile))
                                 .font(.callout.weight(.semibold))
                                 .foregroundStyle(.white.opacity(0.62))
                                 .lineLimit(1)
-                            let postAuthorBadges = store.favoriteGames(for: post.authorID)
+                            let postAuthorBadges = store.displayBadges(for: post.authorID)
                             if !postAuthorBadges.isEmpty {
-                                HStack(spacing: 3) {
+                                HStack(spacing: 2) {
                                     ForEach(postAuthorBadges.prefix(3)) { badge in
-                                        RemoteMediaImage(
-                                            primaryURL: badge.coverImageURL,
-                                            fallbackURL: MediaFallback.gameCover
-                                        )
-                                        .frame(width: 18, height: 18)
-                                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                                        .overlay {
-                                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                                .stroke(Color.white.opacity(0.25), lineWidth: 0.5)
-                                        }
+                                        Text(badge.emoji)
+                                            .font(.system(size: 12))
                                     }
                                 }
                             }
@@ -402,6 +444,37 @@ struct PostCommentsDetailView: View {
         return profile.username
     }
 
+    private func scrollToHighlightIfNeeded(proxy: ScrollViewProxy) {
+        guard let targetID = highlightCommentID,
+              !hasScrolledToHighlight,
+              !comments.isEmpty else { return }
+
+        // Check if the target comment exists in the loaded comments
+        guard comments.contains(where: { $0.id == targetID }) else { return }
+
+        // If the target is a reply, auto-expand its parent's reply chain
+        if let targetComment = comments.first(where: { $0.id == targetID }),
+           let parentID = targetComment.parentCommentID {
+            expandedReplyParentIDs.insert(parentID)
+        }
+
+        hasScrolledToHighlight = true
+
+        // Delay slightly to let expansion animation settle
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            withAnimation(.easeInOut(duration: 0.3)) {
+                // If it's a reply, scroll to the parent (since replies are inside the parent row)
+                if let targetComment = comments.first(where: { $0.id == targetID }),
+                   let parentID = targetComment.parentCommentID {
+                    proxy.scrollTo(parentID, anchor: .top)
+                } else {
+                    proxy.scrollTo(targetID, anchor: .top)
+                }
+            }
+        }
+    }
+
     private func topSortScore(for comment: Comment, replyCount: Int) -> Double {
         let liveReactionTotal = store.commentReactionTotal(for: comment)
         let reactionScore = max(
@@ -434,6 +507,7 @@ struct PostCommentsDetailView: View {
                     text: $draftComment,
                     axis: .vertical
                 )
+                .focused($isCommentFocused)
                 .lineLimit(1...5)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 12)
@@ -442,9 +516,14 @@ struct PostCommentsDetailView: View {
 
                 Button {
                     let parentId = replyingToRootCommentID
-                    store.addComment(to: post.id, body: draftComment, parentId: parentId)
+                    let replyToId = replyToSpecificCommentID
+                    store.addComment(to: post.id, body: draftComment, parentId: parentId, replyToCommentId: replyToId)
+                    if let parentId {
+                        expandedReplyParentIDs.insert(parentId)
+                    }
                     draftComment = ""
                     replyingToRootCommentID = nil
+                    replyToSpecificCommentID = nil
                 } label: {
                     Text("Send")
                         .font(.footnote.weight(.bold))
@@ -472,9 +551,11 @@ struct CommentRowCard: View {
     let reactionCounts: [CommentReactionCount]
     let selectedReactionTypeIDs: Set<UUID>
     let reactionTotalOverride: Int
-    var authorFavoriteGames: [FavoriteGameBadge] = []
+    var authorDisplayBadges: [DisplayBadge] = []
     let onReact: (UUID) -> Void
     let onReply: (() -> Void)?
+    var currentUserID: UUID? = nil
+    var currentUserAvatarEmoji: String = "🎮"
 
     @State private var showingCommentReactionPicker = false
 
@@ -484,33 +565,39 @@ struct CommentRowCard: View {
             return (type: type, count: rc.count)
         }
         .sorted { $0.count > $1.count }
-        .prefix(5)
+        .prefix(3)
         .map { $0 }
+    }
+
+    private var heartReactionType: ReactionType? {
+        reactionTypes.first { $0.emoji == "💜" } ?? reactionTypes.first
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            // Header: author + badges + timestamp + Reply
+            // Header: avatar + author + badges + timestamp + Reply
             HStack(spacing: 5) {
+                Text({
+                    if let uid = currentUserID, comment.user_id == uid {
+                        return currentUserAvatarEmoji
+                    }
+                    return authorProfile?.avatarEmoji ?? AvatarCatalog.emoji(for: comment.author_avatar_slug)
+                }())
+                    .font(.system(size: 18))
+                    .frame(width: 26, height: 26)
+                    .background(Color.white.opacity(0.08), in: Circle())
+
                 if let authorText = authorDisplayName {
                     Text(authorText)
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white.opacity(0.88))
                 }
 
-                if !authorFavoriteGames.isEmpty {
-                    HStack(spacing: 3) {
-                        ForEach(authorFavoriteGames.prefix(3)) { badge in
-                            RemoteMediaImage(
-                                primaryURL: badge.coverImageURL,
-                                fallbackURL: MediaFallback.gameCover
-                            )
-                            .frame(width: 16, height: 16)
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                    .stroke(Color.white.opacity(0.25), lineWidth: 0.5)
-                            }
+                if !authorDisplayBadges.isEmpty {
+                    HStack(spacing: 2) {
+                        ForEach(authorDisplayBadges.prefix(3)) { badge in
+                            Text(badge.emoji)
+                                .font(.system(size: 12))
                         }
                     }
                 }
@@ -544,11 +631,38 @@ struct CommentRowCard: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Inline reactions (compact row)
+            // Inline reactions: heart + top reactions + picker
             if !reactionTypes.isEmpty {
                 HStack(spacing: 4) {
-                    // Show reactions that have counts
-                    ForEach(activeCommentReactions, id: \.type.id) { item in
+                    // Default heart reaction button
+                    if let heart = heartReactionType {
+                        let heartSelected = selectedReactionTypeIDs.contains(heart.id)
+                        let heartCount = reactionCounts.first(where: { $0.reactionTypeID == heart.id })?.count ?? 0
+                        Button {
+                            onReact(heart.id)
+                        } label: {
+                            HStack(spacing: 2) {
+                                Image(systemName: heartSelected ? "heart.fill" : "heart")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(heartSelected ? .purple : .white.opacity(0.50))
+                                if heartCount > 0 {
+                                    Text("\(heartCount)")
+                                        .font(.caption2.weight(.semibold))
+                                }
+                            }
+                            .foregroundStyle(.white.opacity(heartSelected ? 0.96 : 0.50))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(
+                                heartSelected ? Color.purple.opacity(0.15) : Color.white.opacity(0.04),
+                                in: Capsule()
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    // Top 2-3 most-used reactions (excluding heart if already shown)
+                    ForEach(activeCommentReactions.filter { $0.type.id != heartReactionType?.id }, id: \.type.id) { item in
                         let isSelected = selectedReactionTypeIDs.contains(item.type.id)
                         Button {
                             onReact(item.type.id)
@@ -570,7 +684,7 @@ struct CommentRowCard: View {
                         .buttonStyle(.plain)
                     }
 
-                    // Add reaction button
+                    // Full picker button
                     Button {
                         showingCommentReactionPicker = true
                     } label: {

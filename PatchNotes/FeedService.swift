@@ -25,6 +25,7 @@ final class FeedService {
         let user_id: UUID
         let body: String
         let parent_comment_id: UUID?
+        let reply_to_comment_id: UUID?
     }
 
     private struct UserReactionRow: Decodable {
@@ -94,8 +95,11 @@ final class FeedService {
     private var postMetricsSubscription: RealtimeSubscription?
     private var commentMetricsChannel: RealtimeChannelV2?
     private var commentMetricsSubscription: RealtimeSubscription?
+    private var commentInsertChannel: RealtimeChannelV2?
+    private var commentInsertSubscription: RealtimeSubscription?
     var onPostMetricsChange: (@MainActor @Sendable (UUID?) -> Void)?
     var onCommentMetricsChange: (@MainActor @Sendable (UUID?) -> Void)?
+    var onCommentInsert: (@MainActor @Sendable (UUID?) -> Void)?
     private static let iso8601WithFractionalSeconds: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -208,6 +212,52 @@ final class FeedService {
         }
     }
 
+    func subscribeToCommentInserts(
+        onChange: @escaping @MainActor @Sendable (UUID?) -> Void
+    ) {
+        onCommentInsert = onChange
+        subscribeToCommentInserts()
+    }
+
+    func subscribeToCommentInserts() {
+        guard commentInsertChannel == nil else { return }
+
+        let channel = client.channel("public:comments:inserts")
+        let onCommentInsert = onCommentInsert
+        let subscription = channel.onPostgresChange(
+            InsertAction.self,
+            schema: "public",
+            table: "comments"
+        ) { payload in
+            let postID = Self.postIDFromCommentRecord(payload.record)
+            Task { @MainActor in
+                onCommentInsert?(postID)
+            }
+        }
+
+        commentInsertChannel = channel
+        commentInsertSubscription = subscription
+
+        Task {
+            do {
+                try await channel.subscribeWithError()
+                print("Subscribed to comments INSERT realtime updates")
+            } catch {
+                print("Comments INSERT realtime subscription error:", error)
+            }
+        }
+    }
+
+    func resetCommentInsertSubscription() {
+        let existingChannel = commentInsertChannel
+
+        commentInsertSubscription = nil
+        commentInsertChannel = nil
+        onCommentInsert = nil
+
+        disposeRealtimeChannel(existingChannel, using: client)
+    }
+
     func resetPostMetricsSubscription() {
         let existingChannel = postMetricsChannel
 
@@ -231,6 +281,7 @@ final class FeedService {
     func resetAllRealtimeSubscriptions() {
         resetPostMetricsSubscription()
         resetCommentMetricsSubscription()
+        resetCommentInsertSubscription()
     }
 
     private func disposeRealtimeChannel(
@@ -548,7 +599,7 @@ final class FeedService {
         case .top:
             let response = try await client
                 .from("post_comments_ranked")
-                .select("id,post_id,user_id,body,parent_comment_id,created_at,reaction_count,hot_score,author_username,author_display_name,author_avatar_url,author_created_at")
+                .select("id,post_id,user_id,body,parent_comment_id,created_at,reaction_count,hot_score,author_username,author_display_name,author_avatar_url,author_created_at,author_avatar_slug")
                 .eq("post_id", value: postID.uuidString)
                 .order("hot_score", ascending: false)
                 .order("created_at", ascending: false)
@@ -558,7 +609,7 @@ final class FeedService {
         case .new:
             let response = try await client
                 .from("post_comments_recent")
-                .select("id,post_id,user_id,body,parent_comment_id,created_at,reaction_count,hot_score,author_username,author_display_name,author_avatar_url,author_created_at")
+                .select("id,post_id,user_id,body,parent_comment_id,created_at,reaction_count,hot_score,author_username,author_display_name,author_avatar_url,author_created_at,author_avatar_slug")
                 .eq("post_id", value: postID.uuidString)
                 .order("created_at", ascending: false)
                 .range(from: offset, to: rangeEnd)
@@ -571,6 +622,7 @@ final class FeedService {
         postId: UUID,
         body: String,
         parentCommentId: UUID?,
+        replyToCommentId: UUID? = nil,
         userId: UUID,
         accessToken: String
     ) async throws {
@@ -582,7 +634,8 @@ final class FeedService {
                     post_id: postId,
                     user_id: userId,
                     body: body,
-                    parent_comment_id: parentCommentId
+                    parent_comment_id: parentCommentId,
+                    reply_to_comment_id: replyToCommentId
                 )
             )
             .execute()
@@ -829,6 +882,11 @@ final class FeedService {
         return UUID(uuidString: commentID)
     }
 
+    private static func postIDFromCommentRecord(_ record: [String: AnyJSON]) -> UUID? {
+        guard let postID = record["post_id"]?.stringValue else { return nil }
+        return UUID(uuidString: postID)
+    }
+
     // MARK: - Onboarding Game Catalog
 
     struct OnboardingGameRow: Decodable {
@@ -912,6 +970,49 @@ final class FeedService {
         return try JSONDecoder().decode([FavoriteGameRow].self, from: response.data)
     }
 
+    // MARK: - Milestone Badges
+
+    struct DisplayBadgeRow: Decodable {
+        let user_id: UUID
+        let badge_slug: String
+        let ordinal: Int
+    }
+
+    private struct FetchDisplayBadgesParams: Encodable {
+        let p_user_ids: [UUID]
+    }
+
+    private struct SetDisplayBadgesParams: Encodable {
+        let p_badge_slugs: [String]
+    }
+
+    func fetchDisplayBadges(userIDs: [UUID]) async throws -> [DisplayBadgeRow] {
+        let response = try await client
+            .rpc("fetch_user_display_badges", params: FetchDisplayBadgesParams(
+                p_user_ids: userIDs
+            ))
+            .execute()
+        return try JSONDecoder().decode([DisplayBadgeRow].self, from: response.data)
+    }
+
+    func setDisplayBadges(slugs: [String], accessToken: String) async throws {
+        let authedClient = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await authedClient
+            .rpc("set_user_display_badges", params: SetDisplayBadgesParams(
+                p_badge_slugs: Array(slugs.prefix(3))
+            ))
+            .execute()
+    }
+
+    func fetchMyMilestones(accessToken: String) async throws -> UserMilestones {
+        let authedClient = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        let response = try await authedClient
+            .rpc("fetch_my_milestones")
+            .execute()
+        let rows = try JSONDecoder().decode([UserMilestones].self, from: response.data)
+        return rows.first ?? UserMilestones(comments_posted: 0, replies_posted: 0, reactions_given: 0)
+    }
+
     // MARK: - Steam Integration
 
     private struct SteamLibrarySyncPayload: Encodable {
@@ -987,6 +1088,22 @@ final class FeedService {
 
         let results = try makeDatabaseDecoder().decode([GameCommunityHealth].self, from: response.data)
         return results.first
+    }
+
+    // MARK: - Avatar
+
+    private struct UpdateAvatarParams: Encodable {
+        let p_avatar_slug: String
+    }
+
+    func updateUserAvatar(
+        slug: String,
+        accessToken: String
+    ) async throws {
+        let authedClient = SupabaseManager.shared.authenticatedClient(accessToken: accessToken)
+        try await authedClient
+            .rpc("update_user_avatar", params: UpdateAvatarParams(p_avatar_slug: slug))
+            .execute()
     }
 
     private func makeDatabaseDecoder() -> JSONDecoder {

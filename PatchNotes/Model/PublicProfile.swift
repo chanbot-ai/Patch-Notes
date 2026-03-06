@@ -7,8 +7,13 @@ struct PublicProfile: Identifiable, Decodable, Equatable {
     let avatar_url: String?
     let created_at: Date
     let is_bot: Bool?
+    let avatar_slug: String?
 
     var isBot: Bool { is_bot ?? false }
+
+    var avatarEmoji: String {
+        AvatarCatalog.emoji(for: avatar_slug)
+    }
 }
 
 struct FavoriteGameBadge: Identifiable, Equatable {

@@ -278,6 +278,8 @@ private struct EditPublicProfileView: View {
                 .preferredColorScheme(.dark)
             case .needsProfile(let profile), .ready(let profile):
                 editProfileView(profile: profile)
+            case .needsAvatar(let profile):
+                editProfileView(profile: profile)
             case .needsGameSelection(let profile):
                 editProfileView(profile: profile)
             }

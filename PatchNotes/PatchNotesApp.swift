@@ -77,6 +77,18 @@ private struct AuthenticatedRootView: View {
                     )
                 }
 
+            case .needsAvatar:
+                AvatarSelectionView(
+                    onComplete: { selectedSlug in
+                        await profileGate.completeAvatarSelection(
+                            session: authManager.session,
+                            slug: selectedSlug
+                        )
+                    },
+                    isSaving: profileGate.isSaving,
+                    errorMessage: profileGate.saveErrorMessage
+                )
+
             case .needsGameSelection:
                 GameSelectionOnboardingView(
                     onComplete: { selectedGameIDs in

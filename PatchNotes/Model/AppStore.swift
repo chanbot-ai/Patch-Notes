@@ -28,6 +28,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var commentReactionCountsByComment: [UUID: [CommentReactionCount]]
     @Published private(set) var viewerCommentReactionTypeIDsByComment: [UUID: Set<UUID>]
     @Published private(set) var notifications: [AppNotification]
+    private var localBadgeNotifications: [AppNotification] = []
     @Published private(set) var notificationActorProfilesByID: [UUID: PublicProfile]
     @Published private(set) var publicProfilesByID: [UUID: PublicProfile]
     @Published private(set) var notificationsIsLoading: Bool
@@ -66,6 +67,10 @@ final class AppStore: ObservableObject {
     @Published private(set) var steamSyncIsLoading: Bool
     @Published private(set) var steamSyncErrorMessage: String?
     @Published private(set) var gameCommunityHealthByGameID: [Game.ID: GameCommunityHealth]
+    @Published private(set) var currentUserAvatarSlug: String?
+    @Published private(set) var displayBadgesByUserID: [UUID: [DisplayBadge]] = [:]
+    @Published private(set) var currentUserMilestones: UserMilestones?
+    @Published var newlyUnlockedBadge: MilestoneBadgeDef? = nil
 
     private var threadsByGame: [Game.ID: [ThreadPost]]
     private let calendar = Calendar.current
@@ -76,6 +81,7 @@ final class AppStore: ObservableObject {
     private var authenticatedSession: Session?
     private var reactionErrorDismissTask: Task<Void, Never>?
     private var hasSubscribedToCommentMetrics = false
+    private var hasSubscribedToCommentInserts = false
     private var notificationsPollTimer: Task<Void, Never>?
     private var commentOffsetsByPost: [UUID: Int]
     private var commentCacheAccessOrder: [UUID] = []
@@ -85,6 +91,7 @@ final class AppStore: ObservableObject {
     private var inFlightPostRefreshIDs: Set<UUID>
     private var inFlightPostReactionKeys: Set<String>
     private var inFlightCommentReactionKeys: Set<String>
+    private var pendingOptimisticCommentIDs: Set<UUID> = []
     private var pendingCommentRealtimePostIDs: Set<UUID>
     private var pendingCommentRealtimeRefreshTask: Task<Void, Never>?
     private var pendingFollowingFeedRealtimeRefreshTask: Task<Void, Never>?
@@ -151,6 +158,9 @@ final class AppStore: ObservableObject {
         self.steamSyncIsLoading = false
         self.steamSyncErrorMessage = nil
         self.gameCommunityHealthByGameID = [:]
+        self.currentUserAvatarSlug = nil
+        self.displayBadgesByUserID = [:]
+        self.currentUserMilestones = nil
         self.threadsByGame = [:]
         self.commentOffsetsByPost = [:]
         self.inFlightPostRefreshIDs = []
@@ -439,6 +449,12 @@ final class AppStore: ObservableObject {
         if authenticatedSession != nil, followedGameIDs.isEmpty && !followedGamesIsLoading {
             loadFollowedGames()
         }
+        if authenticatedSession != nil, currentUserAvatarSlug == nil {
+            loadCurrentUserAvatar()
+        }
+        if authenticatedSession != nil {
+            loadMyMilestones()
+        }
     }
 
     func setAuthenticatedSession(_ session: Session?) {
@@ -464,6 +480,9 @@ final class AppStore: ObservableObject {
             followedGamesErrorMessage = nil
             followedGamesIsLoading = false
             hasLoadedFollowingFeedOnce = false
+            currentUserAvatarSlug = nil
+            displayBadgesByUserID = [:]
+            currentUserMilestones = nil
         }
 
         if didRotateAccessToken,
@@ -475,6 +494,7 @@ final class AppStore: ObservableObject {
         if session == nil {
             hasSubscribed = false
             hasSubscribedToCommentMetrics = false
+            hasSubscribedToCommentInserts = false
             stopNotificationsPolling()
             feedService.resetAllRealtimeSubscriptions()
             viewerReactionTypeIDsByPost = [:]
@@ -512,11 +532,52 @@ final class AppStore: ObservableObject {
             gameFeedHasMoreByGameID = [:]
             gameFeedIsLoadingMoreByGameID = [:]
             gameFeedCursorByGameID = [:]
+            displayBadgesByUserID = [:]
+            currentUserMilestones = nil
             steamProfile = nil
             steamOwnedGames = []
             steamSyncIsLoading = false
             steamSyncErrorMessage = nil
             gameCommunityHealthByGameID = [:]
+        }
+    }
+
+    // MARK: - Avatar
+
+    var authenticatedUserID: UUID? {
+        authenticatedSession?.user.id
+    }
+
+    var currentUserAvatarEmoji: String {
+        AvatarCatalog.emoji(for: currentUserAvatarSlug)
+    }
+
+    func loadCurrentUserAvatar() {
+        guard let session = authenticatedSession else { return }
+        Task {
+            do {
+                if let profile = try await publicProfileService.fetchPublicProfile(id: session.user.id) {
+                    currentUserAvatarSlug = profile.avatar_slug
+                }
+            } catch {
+                print("Failed to load user avatar:", error)
+            }
+        }
+    }
+
+    func updateAvatar(slug: String) {
+        guard let session = authenticatedSession else { return }
+        currentUserAvatarSlug = slug
+        Task {
+            do {
+                try await feedService.updateUserAvatar(
+                    slug: slug,
+                    accessToken: session.accessToken
+                )
+                await refreshPublicProfiles(for: [session.user.id])
+            } catch {
+                print("Failed to update avatar:", error)
+            }
         }
     }
 
@@ -638,6 +699,7 @@ final class AppStore: ObservableObject {
 
     func loadInitialComments(for postId: UUID) {
         subscribeToCommentMetricsRealtime()
+        subscribeToCommentInsertsRealtime()
         commentOffsetsByPost[postId] = 0
         var nextComments = commentsByPost
         nextComments[postId] = []
@@ -652,6 +714,8 @@ final class AppStore: ObservableObject {
 
     func ensureCommentsLoaded(for postId: UUID) {
         touchCommentCache(for: postId)
+        // Always reset to TOP sort when opening comments (Prompt 8)
+        commentSortByPost[postId] = .top
         if commentsByPost[postId] == nil {
             loadInitialComments(for: postId)
         }
@@ -680,7 +744,7 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func addComment(to postId: UUID, body: String, parentId: UUID? = nil) {
+    func addComment(to postId: UUID, body: String, parentId: UUID? = nil, replyToCommentId: UUID? = nil) {
         let cleaned = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
         guard let session = authenticatedSession else {
@@ -714,9 +778,11 @@ final class AppStore: ObservableObject {
             author_username: nil,
             author_display_name: nil,
             author_avatar_url: nil,
-            author_created_at: nil
+            author_created_at: nil,
+            author_avatar_slug: currentUserAvatarSlug
         )
 
+        pendingOptimisticCommentIDs.insert(tempComment.id)
         applyOptimisticCommentInsert(tempComment)
         Task { @MainActor [weak self] in
             await self?.refreshPublicProfiles(for: [userId])
@@ -724,15 +790,18 @@ final class AppStore: ObservableObject {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
+            defer { self.pendingOptimisticCommentIDs.remove(tempComment.id) }
             do {
                 try await self.feedService.insertComment(
                     postId: postId,
                     body: cleaned,
                     parentCommentId: normalizedParentId,
+                    replyToCommentId: replyToCommentId,
                     userId: userId,
                     accessToken: accessToken
                 )
                 // Realtime on post_metrics.comment_count will reconcile the full comment list.
+                self.loadMyMilestones()
             } catch {
                 self.removeOptimisticComment(tempComment)
                 print("Comment insert failed:", error)
@@ -777,6 +846,11 @@ final class AppStore: ObservableObject {
             return
         }
 
+        guard !pendingOptimisticCommentIDs.contains(commentId) else {
+            showReactionError("Comment is still saving. Try again in a moment.")
+            return
+        }
+
         let operationKey = "\(commentId.uuidString)|\(reactionTypeId.uuidString)"
         guard !inFlightCommentReactionKeys.contains(operationKey) else { return }
         inFlightCommentReactionKeys.insert(operationKey)
@@ -794,7 +868,6 @@ final class AppStore: ObservableObject {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.inFlightCommentReactionKeys.remove(operationKey) }
             do {
                 if currentlySelected {
                     try await self.feedService.removeCommentReaction(
@@ -811,8 +884,12 @@ final class AppStore: ObservableObject {
                         accessToken: accessToken
                     )
                 }
+                self.inFlightCommentReactionKeys.remove(operationKey)
                 clearReactionError()
+                await self.refreshCommentReactionState(for: [commentId])
+                self.loadMyMilestones()
             } catch {
+                self.inFlightCommentReactionKeys.remove(operationKey)
                 var nextCounts = self.commentReactionCountsByComment
                 nextCounts[commentId] = previousCounts
                 self.commentReactionCountsByComment = nextCounts
@@ -857,6 +934,20 @@ final class AppStore: ObservableObject {
             guard let self, let updatedCommentID else { return }
             Task { await self.handleCommentMetricsRealtime(commentId: updatedCommentID) }
         }
+    }
+
+    func subscribeToCommentInsertsRealtime() {
+        guard !hasSubscribedToCommentInserts else { return }
+        hasSubscribedToCommentInserts = true
+        feedService.subscribeToCommentInserts { [weak self] postID in
+            guard let self, let postID else { return }
+            Task { await self.handleCommentInsertRealtime(postId: postID) }
+        }
+    }
+
+    private func handleCommentInsertRealtime(postId: UUID) async {
+        guard commentsByPost[postId] != nil else { return }
+        scheduleCommentThreadRefresh(for: postId)
     }
 
     func startNotificationsPolling() {
@@ -1009,6 +1100,7 @@ final class AppStore: ObservableObject {
             await refreshPublicProfiles(for: fetched.compactMap(\.authorID))
             await hydrateGameCatalog(for: fetched)
             loadFavoriteGames(for: fetched.compactMap(\.authorID))
+            loadDisplayBadges(for: fetched.compactMap(\.authorID))
             hasLoadedFollowingFeedOnce = true
             followingPosts = fetched.sorted(by: Self.sortPosts)
 
@@ -1245,6 +1337,9 @@ final class AppStore: ObservableObject {
             if favoriteGamesByUserID[session.user.id] == nil {
                 loadFavoriteGames(for: [session.user.id])
             }
+            if displayBadgesByUserID[session.user.id] == nil {
+                loadDisplayBadges(for: [session.user.id])
+            }
         } catch {
             followedGamesErrorMessage = error.localizedDescription
             print("Error loading followed games:", error)
@@ -1325,7 +1420,6 @@ final class AppStore: ObservableObject {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     var nextPosts = posts
                     nextPosts[index] = updated
-                    nextPosts.sort(by: Self.sortPosts)
                     posts = nextPosts
 
                     var nextTotals = reactionTotalsByPost
@@ -1340,17 +1434,25 @@ final class AppStore: ObservableObject {
                 if let followingIndex = followingPosts.firstIndex(where: { $0.id == postId }) {
                     var nextFollowing = followingPosts
                     nextFollowing[followingIndex] = updated
-                    nextFollowing.sort(by: Self.sortPosts)
                     followingPosts = nextFollowing
                 }
             } else {
                 if let followingIndex = followingPosts.firstIndex(where: { $0.id == postId }) {
                     var nextFollowing = followingPosts
                     nextFollowing[followingIndex] = updated
-                    nextFollowing.sort(by: Self.sortPosts)
                     followingPosts = nextFollowing
                 } else {
                     // No full-feed realtime refetch here; manual refresh/load can reconcile membership.
+                }
+            }
+
+            // Also update the post in any game-specific feed
+            for (gameID, gamePosts) in gameFeedPostsByGameID {
+                if let gameIndex = gamePosts.firstIndex(where: { $0.id == postId }) {
+                    var nextGamePosts = gamePosts
+                    nextGamePosts[gameIndex] = updated
+                    gameFeedPostsByGameID[gameID] = nextGamePosts
+                    break
                 }
             }
             if shouldReconcileFollowingFeedMembership {
@@ -1391,6 +1493,7 @@ final class AppStore: ObservableObject {
         do {
             let fetched = try await feedService.fetchNotifications(accessToken: accessToken, limit: 50)
             notifications = fetched
+            mergeBadgeNotifications()
             await refreshNotificationActorProfiles(for: fetched)
         } catch {
             if isNotificationsAuthError(error),
@@ -1456,6 +1559,7 @@ final class AppStore: ObservableObject {
                 }
                 clearReactionError()
                 // Metrics + counts reconcile through realtime callbacks.
+                self.loadMyMilestones()
             } catch {
                 var nextCounts = self.reactionCountsByPost
                 nextCounts[postId] = previousCounts
@@ -1499,6 +1603,15 @@ final class AppStore: ObservableObject {
 
     func comments(for postId: UUID) -> [Comment] {
         commentsByPost[postId] ?? []
+    }
+
+    private func mergeBadgeNotifications() {
+        let serverIDs = Set(notifications.filter { !$0.type.hasPrefix("badge_unlock:") }.map(\.id))
+        let existing = Set(notifications.filter { $0.type.hasPrefix("badge_unlock:") }.map(\.id))
+        let toInsert = localBadgeNotifications.filter { !existing.contains($0.id) }
+        if !toInsert.isEmpty {
+            notifications.insert(contentsOf: toInsert, at: 0)
+        }
     }
 
     var unreadNotificationsCount: Int {
@@ -1558,6 +1671,112 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // MARK: - Display Badges (Milestone)
+
+    func displayBadges(for userID: UUID?) -> [DisplayBadge] {
+        guard let userID else { return [] }
+        return displayBadgesByUserID[userID] ?? []
+    }
+
+    func loadDisplayBadges(for userIDs: [UUID]) {
+        let newIDs = userIDs.filter { displayBadgesByUserID[$0] == nil }
+        guard !newIDs.isEmpty else { return }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let rows = try await self.feedService.fetchDisplayBadges(userIDs: newIDs)
+                var grouped: [UUID: [DisplayBadge]] = [:]
+                for row in rows {
+                    let badge = DisplayBadge(slug: row.badge_slug, ordinal: row.ordinal)
+                    grouped[row.user_id, default: []].append(badge)
+                }
+                for (userID, badges) in grouped {
+                    self.displayBadgesByUserID[userID] = badges.sorted { $0.ordinal < $1.ordinal }
+                }
+                for userID in newIDs where grouped[userID] == nil {
+                    self.displayBadgesByUserID[userID] = []
+                }
+            } catch {
+                // Silently fail - badges are non-critical
+            }
+        }
+    }
+
+    func loadMyMilestones() {
+        guard let session = authenticatedSession else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let milestones = try await self.feedService.fetchMyMilestones(accessToken: session.accessToken)
+                self.currentUserMilestones = milestones
+                self.checkForNewBadgeUnlocks(milestones: milestones)
+            } catch {
+                print("Failed to load milestones:", error)
+            }
+        }
+    }
+
+    private func checkForNewBadgeUnlocks(milestones: UserMilestones) {
+        guard let userId = authenticatedSession?.user.id else { return }
+        let earned = MilestoneBadgeCatalog.earnedBadges(for: milestones)
+        let earnedSlugs = Set(earned.map(\.slug))
+
+        let udKey = "notifiedBadgeSlugs_\(userId.uuidString)"
+        var notified = Set(UserDefaults.standard.stringArray(forKey: udKey) ?? [])
+
+        let newSlugs = earnedSlugs.subtracting(notified)
+        guard !newSlugs.isEmpty else { return }
+
+        // Collect all new badges to show
+        let newBadges = newSlugs.compactMap { MilestoneBadgeCatalog.badge(for: $0) }
+        guard !newBadges.isEmpty else { return }
+
+        // Mark all as notified
+        notified.formUnion(newSlugs)
+        UserDefaults.standard.set(Array(notified), forKey: udKey)
+
+        // Add in-app notification entries
+        let badgeNotifications = newBadges.map { badge in
+            AppNotification(
+                id: UUID(),
+                user_id: userId,
+                actor_user_id: userId,
+                post_id: nil,
+                comment_id: nil,
+                type: "badge_unlock:\(badge.slug)",
+                created_at: Date(),
+                read: false
+            )
+        }
+        localBadgeNotifications.append(contentsOf: badgeNotifications)
+        mergeBadgeNotifications()
+
+        // Show badges sequentially as toast banners
+        Task { @MainActor in
+            for badge in newBadges {
+                withAnimation { self.newlyUnlockedBadge = badge }
+                try? await Task.sleep(nanoseconds: 3_500_000_000)
+                withAnimation { self.newlyUnlockedBadge = nil }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+    }
+
+    func updateDisplayBadges(slugs: [String]) {
+        guard let session = authenticatedSession else { return }
+        // Optimistic update
+        let badges = slugs.prefix(3).enumerated().map { DisplayBadge(slug: $1, ordinal: $0 + 1) }
+        displayBadgesByUserID[session.user.id] = badges
+        Task {
+            do {
+                try await feedService.setDisplayBadges(slugs: Array(slugs.prefix(3)), accessToken: session.accessToken)
+            } catch {
+                print("Failed to update display badges:", error)
+            }
+        }
+    }
+
     func markNotificationRead(_ notificationID: UUID) {
         guard let session = authenticatedSession else { return }
 
@@ -1568,8 +1787,7 @@ final class AppStore: ObservableObject {
         guard notifications[index].isRead == false else { return }
 
         let previous = notifications[index]
-        var next = notifications
-        next[index] = AppNotification(
+        let readNotification = AppNotification(
             id: previous.id,
             user_id: previous.user_id,
             actor_user_id: previous.actor_user_id,
@@ -1579,7 +1797,18 @@ final class AppStore: ObservableObject {
             created_at: previous.created_at,
             read: true
         )
+
+        var next = notifications
+        next[index] = readNotification
         notifications = next
+
+        // Badge notifications are local-only — update the local array and skip server call
+        if previous.type.hasPrefix("badge_unlock:") {
+            if let localIndex = localBadgeNotifications.firstIndex(where: { $0.id == notificationID }) {
+                localBadgeNotifications[localIndex] = readNotification
+            }
+            return
+        }
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1605,8 +1834,8 @@ final class AppStore: ObservableObject {
         let previous = notifications
         guard previous.contains(where: { !$0.isRead }) else { return }
 
-        notifications = previous.map { item in
-            guard item.isRead == false else { return item }
+        let markRead: (AppNotification) -> AppNotification = { item in
+            guard !item.isRead else { return item }
             return AppNotification(
                 id: item.id,
                 user_id: item.user_id,
@@ -1618,6 +1847,9 @@ final class AppStore: ObservableObject {
                 read: true
             )
         }
+
+        notifications = previous.map(markRead)
+        localBadgeNotifications = localBadgeNotifications.map(markRead)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1634,6 +1866,12 @@ final class AppStore: ObservableObject {
         guard let postID = notification.postID else { return nil }
         if let cached = posts.first(where: { $0.id == postID }) ?? followingPosts.first(where: { $0.id == postID }) {
             return cached
+        }
+        // Also search game feed caches
+        for (_, gamePosts) in gameFeedPostsByGameID {
+            if let cached = gamePosts.first(where: { $0.id == postID }) {
+                return cached
+            }
         }
         do {
             return try await feedService.fetchPost(postID: postID)
@@ -1897,6 +2135,8 @@ final class AppStore: ObservableObject {
             await refreshCommentReactionState(for: trimmed.map(\.id))
             cachePublicProfiles(from: trimmed)
             await refreshPublicProfiles(for: trimmed.map(\.userID))
+            loadFavoriteGames(for: trimmed.map(\.userID))
+            loadDisplayBadges(for: trimmed.map(\.userID))
         } catch {
             var latestErrors = commentLoadErrorByPost
             latestErrors[postId] = error.localizedDescription
@@ -1957,9 +2197,15 @@ final class AppStore: ObservableObject {
     }
 
     private func unsubscribeFromCommentMetricsIfIdle() {
-        guard hasSubscribedToCommentMetrics, commentsByPost.isEmpty else { return }
-        hasSubscribedToCommentMetrics = false
-        feedService.resetCommentMetricsSubscription()
+        guard commentsByPost.isEmpty else { return }
+        if hasSubscribedToCommentMetrics {
+            hasSubscribedToCommentMetrics = false
+            feedService.resetCommentMetricsSubscription()
+        }
+        if hasSubscribedToCommentInserts {
+            hasSubscribedToCommentInserts = false
+            feedService.resetCommentInsertSubscription()
+        }
     }
 
     private func applyOptimisticCommentInsert(_ comment: Comment) {
@@ -2013,7 +2259,10 @@ final class AppStore: ObservableObject {
         guard let session = authenticatedSession else { return }
 
         let visibleCommentIDs = Set(commentsByPost.values.flatMap { $0.map(\.id) })
-        let targetCommentIDs = commentIDs.filter { visibleCommentIDs.contains($0) }
+        let targetCommentIDs = commentIDs.filter { commentID in
+            visibleCommentIDs.contains(commentID)
+            && !inFlightCommentReactionKeys.contains { $0.hasPrefix(commentID.uuidString + "|") }
+        }
         guard !targetCommentIDs.isEmpty else { return }
 
         do {

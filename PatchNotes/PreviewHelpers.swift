@@ -114,7 +114,8 @@ enum PreviewHelpers {
             display_name: displayName,
             avatar_url: nil,
             created_at: Date(timeIntervalSinceReferenceDate: 750_000_000),
-            is_bot: false
+            is_bot: false,
+            avatar_slug: "gamer_1"
         )
     }
 
@@ -137,7 +138,8 @@ enum PreviewHelpers {
             author_username: "chanbot",
             author_display_name: "Chan",
             author_avatar_url: nil,
-            author_created_at: Date(timeIntervalSinceReferenceDate: 750_000_000)
+            author_created_at: Date(timeIntervalSinceReferenceDate: 750_000_000),
+            author_avatar_slug: "gamer_1"
         )
     }
 
