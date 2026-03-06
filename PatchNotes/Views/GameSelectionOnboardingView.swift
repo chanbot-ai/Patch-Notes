@@ -10,9 +10,10 @@ struct GameSelectionOnboardingView: View {
     @State private var selectedGameOrder: [UUID] = []
     @State private var isLoadingCatalog = true
     @State private var catalogError: String?
+    @State private var searchText = ""
 
     private let feedService = FeedService()
-    private let minimumSelections = 3
+    private let minimumSelections = 0
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -73,8 +74,25 @@ struct GameSelectionOnboardingView: View {
                         .padding(.top, 40)
                         .padding(.horizontal, 16)
                     } else {
+                        // Search bar
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.white.opacity(0.4))
+                                .font(.system(size: 15))
+                            TextField("Search games", text: $searchText)
+                                .textFieldStyle(.plain)
+                                .font(.subheadline)
+                                .foregroundStyle(.white)
+                                .autocorrectionDisabled()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+
                         LazyVStack(alignment: .leading, spacing: 24) {
-                            ForEach(categories) { category in
+                            ForEach(filteredCategories) { category in
                                 categorySection(category)
                             }
                         }
@@ -99,13 +117,9 @@ struct GameSelectionOnboardingView: View {
                 .fontDesign(.rounded)
                 .foregroundStyle(.white)
 
-            Text("Select at least \(minimumSelections) games to personalize your feed.")
+            Text("Follow games to personalize your feed, or skip to explore.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.70))
-
-            Text("Your first 3 picks become badges on your profile!")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(AppTheme.accent.opacity(0.85))
 
             HStack(spacing: 6) {
                 Image(systemName: selectionMet ? "checkmark.circle.fill" : "circle")
@@ -267,7 +281,7 @@ struct GameSelectionOnboardingView: View {
                     if isSaving {
                         ProgressView().tint(.white)
                     }
-                    Text(isSaving ? "Saving…" : "Continue")
+                    Text(isSaving ? "Saving…" : (selectedGameIDs.isEmpty ? "Skip" : "Continue"))
                         .font(.headline.weight(.semibold))
                 }
                 .frame(maxWidth: .infinity)
@@ -298,6 +312,15 @@ struct GameSelectionOnboardingView: View {
     }
 
     // MARK: - Helpers
+
+    private var filteredCategories: [OnboardingCategory] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return categories }
+        return categories.compactMap { category in
+            let matched = category.games.filter { $0.title.lowercased().contains(query) }
+            return matched.isEmpty ? nil : OnboardingCategory(name: category.name, games: matched)
+        }
+    }
 
     private var selectionMet: Bool {
         selectedGameIDs.count >= minimumSelections

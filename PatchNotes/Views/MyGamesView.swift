@@ -538,6 +538,7 @@ struct GameBrowserView: View {
     @State private var categories: [OnboardingCategory] = []
     @State private var isLoading = true
     @State private var loadError: String?
+    @State private var searchText = ""
 
     private let feedService = FeedService()
 
@@ -551,6 +552,16 @@ struct GameBrowserView: View {
         "Upcoming", "Award Winners", "Popular", "Classics",
         "Multiplatform", "PlayStation", "Xbox", "Nintendo", "PC"
     ]
+
+    private var filteredCategories: [OnboardingCategory] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return categories }
+        return categories.compactMap { category in
+            let matchingGames = category.games.filter { $0.title.lowercased().contains(query) }
+            guard !matchingGames.isEmpty else { return nil }
+            return OnboardingCategory(name: category.name, games: matchingGames)
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -591,8 +602,24 @@ struct GameBrowserView: View {
                 .padding(.top, 40)
                 .padding(.horizontal, 16)
             } else {
+                // Search bar
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.5))
+                    TextField("Search games", text: $searchText)
+                        .font(.subheadline)
+                        .foregroundStyle(.white)
+                        .autocorrectionDisabled()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
                 LazyVStack(alignment: .leading, spacing: 24) {
-                    ForEach(categories) { category in
+                    ForEach(filteredCategories) { category in
                         VStack(alignment: .leading, spacing: 10) {
                             Text(category.name)
                                 .font(.headline.weight(.bold))

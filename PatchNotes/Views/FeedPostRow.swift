@@ -12,7 +12,9 @@ struct FeedPostRow: View {
     let onOpenPostDetail: (() -> Void)?
     let onOpenComments: () -> Void
     let onGameTap: ((Game.ID) -> Void)?
-    var authorFavoriteGames: [FavoriteGameBadge] = []
+    var showJoinButton: Bool = false
+    var isGameFollowed: Bool = true
+    var onJoinGame: (() -> Void)?
 
     @State private var showingReactionPicker = false
 
@@ -59,6 +61,20 @@ struct FeedPostRow: View {
                 }
 
                 Spacer(minLength: 4)
+
+                if showJoinButton && !isGameFollowed, let onJoinGame {
+                    Button {
+                        onJoinGame()
+                    } label: {
+                        Text("Join")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(AppTheme.accent, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 Button {
                     sharePost()

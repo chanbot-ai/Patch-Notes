@@ -24,8 +24,9 @@ struct FeedView: View {
 
     @State private var showingComposer = false
     @State private var showingNotifications = false
-    @State private var showSettings = false
+    @State private var showProfileDrawer = false
     @State private var selectedCommentsPost: Post?
+    @State private var highlightCommentID: UUID?
     @State private var feedFilter: FeedFilter = .forYou
 
     // MARK: - Active Feed Computed Properties
@@ -33,7 +34,8 @@ struct FeedView: View {
     private var activePosts: [Post] {
         switch feedFilter {
         case .forYou:
-            return store.followingPosts
+            // Fall back to hot feed when user follows no games
+            return store.followedGameIDs.isEmpty ? store.posts : store.followingPosts
         case .game(let gameID):
             return store.gameFeedPostsByGameID[gameID] ?? []
         }
@@ -42,7 +44,7 @@ struct FeedView: View {
     private var activeFeedIsLoading: Bool {
         switch feedFilter {
         case .forYou:
-            return store.followingFeedIsLoading
+            return store.followedGameIDs.isEmpty ? store.feedIsLoading : store.followingFeedIsLoading
         case .game(let gameID):
             return store.gameFeedIsLoadingByGameID[gameID] ?? false
         }
@@ -51,7 +53,7 @@ struct FeedView: View {
     private var activeFeedErrorMessage: String? {
         switch feedFilter {
         case .forYou:
-            return store.followingFeedErrorMessage
+            return store.followedGameIDs.isEmpty ? store.feedErrorMessage : store.followingFeedErrorMessage
         case .game(let gameID):
             return store.gameFeedErrorByGameID[gameID]
         }
@@ -60,7 +62,7 @@ struct FeedView: View {
     private var activeFeedHasMore: Bool {
         switch feedFilter {
         case .forYou:
-            return store.followingFeedHasMore
+            return store.followedGameIDs.isEmpty ? store.hotFeedHasMore : store.followingFeedHasMore
         case .game(let gameID):
             return store.gameFeedHasMoreByGameID[gameID] ?? true
         }
@@ -69,7 +71,7 @@ struct FeedView: View {
     private var activeFeedIsLoadingMore: Bool {
         switch feedFilter {
         case .forYou:
-            return store.followingFeedIsLoadingMore
+            return store.followedGameIDs.isEmpty ? store.hotFeedIsLoadingMore : store.followingFeedIsLoadingMore
         case .game(let gameID):
             return store.gameFeedIsLoadingMoreByGameID[gameID] ?? false
         }
@@ -145,6 +147,15 @@ struct FeedView: View {
                             },
                             onGameTap: { gameID in
                                 feedFilter = .game(gameID)
+                            },
+                            showJoinButton: store.followedGameIDs.isEmpty,
+                            isGameFollowed: {
+                                guard let gameID = post.gameID else { return true }
+                                return store.followedGameIDs.contains(gameID)
+                            }(),
+                            onJoinGame: {
+                                guard let gameID = post.gameID else { return }
+                                store.followGameByID(gameID)
                             }
                         )
                         .onAppear {
@@ -171,6 +182,25 @@ struct FeedView: View {
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top) {
             HStack(spacing: 14) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        showProfileDrawer = true
+                    }
+                } label: {
+                    Text(store.currentUserAvatarEmoji)
+                        .font(.system(size: 20))
+                        .frame(width: 36, height: 36)
+                        .background(Color.white.opacity(0.10), in: Circle())
+                        .overlay {
+                            Circle()
+                                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Profile")
+
+                Spacer(minLength: 0)
+
                 circleFeedActionButton(
                     systemImage: "bell",
                     accessibilityLabel: store.unreadNotificationsCount > 0
@@ -179,16 +209,6 @@ struct FeedView: View {
                     badgeCount: store.unreadNotificationsCount
                 ) {
                     showingNotifications = true
-                }
-
-                Spacer(minLength: 0)
-
-                circleFeedActionButton(
-                    systemImage: "gearshape.fill",
-                    accessibilityLabel: "Settings",
-                    badgeCount: nil
-                ) {
-                    showSettings = true
                 }
             }
             .padding(.horizontal, 12)
@@ -210,21 +230,31 @@ struct FeedView: View {
         }
         .sheet(item: $selectedCommentsPost) { post in
             NavigationStack {
-                PostCommentsDetailView(post: post)
+                PostCommentsDetailView(post: post, highlightCommentID: highlightCommentID)
                     .environmentObject(store)
+                    .onDisappear { highlightCommentID = nil }
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsSheetView()
-                .environmentObject(settings)
+        .overlay {
+            if showProfileDrawer {
+                ProfileDrawerView(isPresented: $showProfileDrawer)
+                    .environmentObject(store)
+                    .environmentObject(authManager)
+                    .environmentObject(settings)
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
         }
         .sheet(isPresented: $showingNotifications) {
             NavigationStack {
                 NotificationsInboxView { notification in
+                    showingNotifications = false
                     Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 500_000_000)
                         guard let post = await store.resolveNotificationPost(notification) else { return }
+                        highlightCommentID = notification.commentID
                         selectedCommentsPost = post
                     }
                 }
@@ -263,7 +293,39 @@ struct FeedView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: store.reactionErrorMessage)
+        .overlay(alignment: .top) {
+            if let badge = store.newlyUnlockedBadge {
+                HStack(spacing: 10) {
+                    Text(badge.emoji)
+                        .font(.title2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Badge Unlocked!")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.7))
+                        Text(badge.label)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(AppTheme.accent.opacity(0.4), lineWidth: 1)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: store.newlyUnlockedBadge?.slug)
         .task {
+            // Ensure followed games are loaded for pill bar (fixes Prompts 3/4/5)
+            if store.followedGameIDs.isEmpty && !store.followedGamesIsLoading {
+                store.loadFollowedGames()
+            }
             if store.followingPosts.isEmpty && !store.followingFeedIsLoading {
                 store.loadFollowingFeed()
             }

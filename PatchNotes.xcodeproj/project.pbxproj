@@ -42,6 +42,11 @@
 		D00000000000000000000011 /* OnboardingGame.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000001 /* OnboardingGame.swift */; };
 		D00000000000000000000012 /* GameSelectionOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000002 /* GameSelectionOnboardingView.swift */; };
 		E00000000000000000000011 /* ReactionPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000001 /* ReactionPickerSheet.swift */; };
+		F00000000000000000000011 /* Avatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000001 /* Avatar.swift */; };
+		F00000000000000000000012 /* AvatarSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000002 /* AvatarSelectionView.swift */; };
+		F00000000000000000000013 /* MilestoneBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000003 /* MilestoneBadge.swift */; };
+		F00000000000000000000014 /* BadgeManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000004 /* BadgeManagementView.swift */; };
+		F00000000000000000000015 /* ProfileDrawerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000005 /* ProfileDrawerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -80,6 +85,11 @@
 		D00000000000000000000001 /* OnboardingGame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingGame.swift; sourceTree = "<group>"; };
 		D00000000000000000000002 /* GameSelectionOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameSelectionOnboardingView.swift; sourceTree = "<group>"; };
 		E00000000000000000000001 /* ReactionPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactionPickerSheet.swift; sourceTree = "<group>"; };
+		F00000000000000000000001 /* Avatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Avatar.swift; sourceTree = "<group>"; };
+		F00000000000000000000002 /* AvatarSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarSelectionView.swift; sourceTree = "<group>"; };
+		F00000000000000000000003 /* MilestoneBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MilestoneBadge.swift; sourceTree = "<group>"; };
+		F00000000000000000000004 /* BadgeManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BadgeManagementView.swift; sourceTree = "<group>"; };
+		F00000000000000000000005 /* ProfileDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileDrawerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -149,6 +159,9 @@
 				B00000000000000000000005 /* PostComposerView.swift */,
 				D00000000000000000000002 /* GameSelectionOnboardingView.swift */,
 				E00000000000000000000001 /* ReactionPickerSheet.swift */,
+				F00000000000000000000002 /* AvatarSelectionView.swift */,
+				F00000000000000000000004 /* BadgeManagementView.swift */,
+				F00000000000000000000005 /* ProfileDrawerView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -161,6 +174,8 @@
 				A0000000000000000000001D /* Post.swift */,
 				A00000000000000000000024 /* PublicProfile.swift */,
 				D00000000000000000000001 /* OnboardingGame.swift */,
+				F00000000000000000000001 /* Avatar.swift */,
+				F00000000000000000000003 /* MilestoneBadge.swift */,
 			);
 			path = Model;
 			sourceTree = "<group>";
@@ -299,6 +314,11 @@
 				D00000000000000000000011 /* OnboardingGame.swift in Sources */,
 				D00000000000000000000012 /* GameSelectionOnboardingView.swift in Sources */,
 				E00000000000000000000011 /* ReactionPickerSheet.swift in Sources */,
+				F00000000000000000000011 /* Avatar.swift in Sources */,
+				F00000000000000000000012 /* AvatarSelectionView.swift in Sources */,
+				F00000000000000000000013 /* MilestoneBadge.swift in Sources */,
+				F00000000000000000000014 /* BadgeManagementView.swift in Sources */,
+				F00000000000000000000015 /* ProfileDrawerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -116,7 +116,8 @@ struct Post: Identifiable, Decodable {
             display_name: author_display_name,
             avatar_url: author_avatar_url,
             created_at: author_created_at,
-            is_bot: nil
+            is_bot: nil,
+            avatar_slug: nil
         )
     }
 
@@ -233,6 +234,7 @@ struct Comment: Identifiable, Decodable, Equatable {
     let author_display_name: String?
     let author_avatar_url: String?
     let author_created_at: Date?
+    let author_avatar_slug: String?
 
     var postID: UUID { post_id }
     var userID: UUID { user_id }
@@ -247,7 +249,8 @@ struct Comment: Identifiable, Decodable, Equatable {
             display_name: author_display_name,
             avatar_url: author_avatar_url,
             created_at: author_created_at,
-            is_bot: nil
+            is_bot: nil,
+            avatar_slug: author_avatar_slug
         )
     }
 }
@@ -362,6 +365,8 @@ struct AppNotification: Identifiable, Decodable, Equatable {
             return "New reply"
         case "post_comment":
             return "New comment"
+        case let t where t.hasPrefix("badge_unlock:"):
+            return "Badge Unlocked!"
         default:
             return "New activity"
         }
@@ -373,6 +378,12 @@ struct AppNotification: Identifiable, Decodable, Equatable {
             return "Someone replied to your comment."
         case "post_comment":
             return "Someone commented on your post."
+        case let t where t.hasPrefix("badge_unlock:"):
+            let slug = String(t.dropFirst("badge_unlock:".count))
+            if let badge = MilestoneBadgeCatalog.badge(for: slug) {
+                return "\(badge.emoji) You earned the \(badge.label) badge!"
+            }
+            return "You earned a new badge!"
         default:
             return "There’s new activity on your feed."
         }

@@ -117,6 +117,7 @@ final class ProfileGateViewModel: ObservableObject {
         case idle
         case loading
         case needsProfile(AppUserProfileRecord?)
+        case needsAvatar(AppUserProfileRecord)
         case needsGameSelection(AppUserProfileRecord)
         case ready(AppUserProfileRecord?)
         case error(String)
@@ -158,7 +159,7 @@ final class ProfileGateViewModel: ObservableObject {
             if let profile, profile.isComplete {
                 phase = .ready(profile)
             } else if let profile, profile.hasProfileInfo {
-                phase = .needsGameSelection(profile)
+                phase = .needsAvatar(profile)
             } else {
                 phase = .needsProfile(profile)
             }
@@ -186,6 +187,28 @@ final class ProfileGateViewModel: ObservableObject {
             isSaving = false
             try? await Task.sleep(nanoseconds: 650_000_000)
             await refresh(session: session)
+        } catch {
+            isSaving = false
+            saveErrorMessage = error.localizedDescription
+        }
+    }
+
+    func completeAvatarSelection(session: Session?, slug: String) async {
+        guard let session else { return }
+
+        isSaving = true
+        saveErrorMessage = nil
+
+        do {
+            try await FeedService().updateUserAvatar(
+                slug: slug,
+                accessToken: session.accessToken
+            )
+            isSaving = false
+
+            if let profile = currentProfile {
+                phase = .needsGameSelection(profile)
+            }
         } catch {
             isSaving = false
             saveErrorMessage = error.localizedDescription
