@@ -38,10 +38,12 @@ BEGIN
     DELETE FROM public.user_display_badges WHERE user_id = v_uid;
 
     -- Insert new badges (up to 3)
-    FOR i IN 1..LEAST(array_length(p_badge_slugs, 1), 3) LOOP
-        INSERT INTO public.user_display_badges (user_id, badge_slug, ordinal)
-        VALUES (v_uid, p_badge_slugs[i], i);
-    END LOOP;
+    IF array_length(p_badge_slugs, 1) IS NOT NULL THEN
+        FOR i IN 1..LEAST(array_length(p_badge_slugs, 1), 3) LOOP
+            INSERT INTO public.user_display_badges (user_id, badge_slug, ordinal)
+            VALUES (v_uid, p_badge_slugs[i], i);
+        END LOOP;
+    END IF;
 END;
 $$;
 

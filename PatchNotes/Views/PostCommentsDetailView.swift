@@ -318,8 +318,10 @@ struct PostCommentsDetailView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: store.newlyUnlockedBadge?.slug)
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                isCommentFocused = true
+            if highlightCommentID == nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isCommentFocused = true
+                }
             }
         }
     }
