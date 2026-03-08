@@ -33,6 +33,7 @@
 		A0000000000000000000004B /* FeedBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000028 /* FeedBadgeView.swift */; };
 		A0000000000000000000004C /* MatchDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000029 /* MatchDetailView.swift */; };
 		A0000000000000000000004D /* FeedCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002A /* FeedCursor.swift */; };
+		A0000000000000000000004E /* PandaScoreService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002B /* PandaScoreService.swift */; };
 		B00000000000000000000011 /* FeedPostRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000001 /* FeedPostRow.swift */; };
 		B00000000000000000000012 /* PostMediaPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* PostMediaPreview.swift */; };
 		B00000000000000000000013 /* PostCommentsDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000003 /* PostCommentsDetailView.swift */; };
@@ -76,6 +77,7 @@
 		A00000000000000000000028 /* FeedBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedBadgeView.swift; sourceTree = "<group>"; };
 		A00000000000000000000029 /* MatchDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchDetailView.swift; sourceTree = "<group>"; };
 		A0000000000000000000002A /* FeedCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedCursor.swift; sourceTree = "<group>"; };
+		A0000000000000000000002B /* PandaScoreService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PandaScoreService.swift; sourceTree = "<group>"; };
 		B00000000000000000000001 /* FeedPostRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedPostRow.swift; sourceTree = "<group>"; };
 		B00000000000000000000002 /* PostMediaPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostMediaPreview.swift; sourceTree = "<group>"; };
 		B00000000000000000000003 /* PostCommentsDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostCommentsDetailView.swift; sourceTree = "<group>"; };
@@ -202,6 +204,7 @@
 			isa = PBXGroup;
 			children = (
 				A0000000000000000000002A /* FeedCursor.swift */,
+				A0000000000000000000002B /* PandaScoreService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -305,6 +308,7 @@
 				A0000000000000000000004B /* FeedBadgeView.swift in Sources */,
 				A0000000000000000000004C /* MatchDetailView.swift in Sources */,
 				A0000000000000000000004D /* FeedCursor.swift in Sources */,
+				A0000000000000000000004E /* PandaScoreService.swift in Sources */,
 				B00000000000000000000011 /* FeedPostRow.swift in Sources */,
 				B00000000000000000000012 /* PostMediaPreview.swift in Sources */,
 				B00000000000000000000013 /* PostCommentsDetailView.swift in Sources */,

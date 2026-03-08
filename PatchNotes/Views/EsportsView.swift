@@ -26,6 +26,48 @@ private struct LeagueScoreSection: Identifiable {
     var id: String { league }
 }
 
+/// Substrings used to recognise the 20 most popular esports organisations.
+/// A team name is included in the filter bar only if it contains one of these
+/// keywords (case-insensitive). Each entry represents a distinct org.
+private let popularOrgKeywords: [String] = [
+    "T1", "Liquid", "FaZe", "Cloud9", "G2", "Fnatic",
+    "Natus Vincere", "NAVI", "100 Thieves", "TSM", "Evil Geniuses",
+    "NRG", "Sentinels", "Paper Rex", "Gen.G", "Loud",
+    "Vitality", "MOUZ", "Heroic", "Virtus"
+]
+
+private func isPopularOrg(_ teamName: String) -> Bool {
+    let lower = teamName.lowercased()
+    return popularOrgKeywords.contains { lower.contains($0.lowercased()) }
+}
+
+private enum EsportsStateFilter: String, CaseIterable, Identifiable {
+    case all      = "All"
+    case live     = "Live"
+    case upcoming = "Upcoming"
+    case completed = "Final"
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .all:       return "square.stack.fill"
+        case .live:      return "antenna.radiowaves.left.and.right"
+        case .upcoming:  return "clock.fill"
+        case .completed: return "checkmark.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .all:       return .white
+        case .live:      return .red
+        case .upcoming:  return AppTheme.accentBlue
+        case .completed: return .white.opacity(0.72)
+        }
+    }
+}
+
 struct EsportsView: View {
     @EnvironmentObject private var store: AppStore
     @State private var selectedFilter: EsportsLeagueFilter = .top
@@ -35,6 +77,8 @@ struct EsportsView: View {
     @State private var selectedMatch: EsportsMatch? = nil
     @State private var showStandingsSheet = false
     @State private var standingsLeague = ""
+    @State private var hasInitiallyLoaded = false
+    @State private var selectedStateFilter: EsportsStateFilter = .all
 
     private var availableFilters: [EsportsLeagueFilter] {
         let leagues = Array(Set(store.esportsMatches.map(\.league))).sorted()
@@ -50,10 +94,26 @@ struct EsportsView: View {
         }
     }
 
-    // Feature 4: favorites sorted to front
+    // League + state filter combined — team filter and sorting are applied on top of this
+    private var baseFilteredMatches: [EsportsMatch] {
+        var base = leagueFilteredMatches
+        switch selectedStateFilter {
+        case .all:
+            break
+        case .live:
+            base = base.filter { $0.state == .live }
+        case .upcoming:
+            base = base.filter { $0.state == .upcoming }
+        case .completed:
+            base = base.filter { $0.state == .final }
+        }
+        return base
+    }
+
+    // Feature 4: favorites sorted to front; restricted to popular orgs only
     private var availableTeams: [String] {
-        let teams = leagueFilteredMatches.flatMap { [$0.homeTeam, $0.awayTeam] }
-        let unique = Array(Set(teams))
+        let teams = baseFilteredMatches.flatMap { [$0.homeTeam, $0.awayTeam] }
+        let unique = Array(Set(teams)).filter(isPopularOrg)
         return unique.sorted { a, b in
             let aFav = store.isFavoriteTeam(a)
             let bFav = store.isFavoriteTeam(b)
@@ -63,7 +123,7 @@ struct EsportsView: View {
     }
 
     private var filteredMatches: [EsportsMatch] {
-        var base = leagueFilteredMatches
+        var base = baseFilteredMatches
         if let team = selectedTeam {
             base = base.filter { $0.homeTeam == team || $0.awayTeam == team }
         }
@@ -97,6 +157,7 @@ struct EsportsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 SectionHeader(title: "Scores", subtitle: "Live game and score updates.")
                 filterBar
+                stateFilterBar
                 teamFilterBar
                 // Feature 9: skeleton / Feature 8: empty state / content
                 if store.isLoadingEsports {
@@ -112,9 +173,17 @@ struct EsportsView: View {
             .padding(.bottom, 24)
         }
         .refreshable { await store.refreshEsports() }
+        .task {
+            guard !hasInitiallyLoaded else { return }
+            hasInitiallyLoaded = true
+            await store.refreshEsports()
+        }
         .navigationTitle("Esports")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: selectedFilter) { _, _ in
+            withAnimation(.spring(duration: 0.25)) { selectedTeam = nil }
+        }
+        .onChange(of: selectedStateFilter) { _, _ in
             withAnimation(.spring(duration: 0.25)) { selectedTeam = nil }
         }
         .sheet(isPresented: $showUpcomingSheet) {
@@ -185,6 +254,56 @@ struct EsportsView: View {
                     .accessibilityLabel("Show \(filter.label) scores")
                 }
             }
+        }
+    }
+
+    // MARK: - State Filter Bar (Live / Upcoming / Final)
+
+    private var stateFilterBar: some View {
+        HStack(spacing: 8) {
+            ForEach(EsportsStateFilter.allCases) { filter in
+                Button {
+                    withAnimation(.spring(duration: 0.22)) {
+                        selectedStateFilter = filter
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        if filter == .live {
+                            LivePulseDot()
+                                .scaleEffect(0.72)
+                        } else {
+                            Image(systemName: filter.systemImage)
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(
+                                    selectedStateFilter == filter ? filter.color : .white.opacity(0.60)
+                                )
+                        }
+                        Text(filter.rawValue)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        selectedStateFilter == filter
+                            ? filter.color.opacity(0.22)
+                            : Color.white.opacity(0.07),
+                        in: Capsule()
+                    )
+                    .overlay {
+                        Capsule()
+                            .stroke(
+                                selectedStateFilter == filter
+                                    ? filter.color.opacity(0.60)
+                                    : Color.white.opacity(0.10),
+                                lineWidth: 1
+                            )
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show \(filter.rawValue) matches")
+            }
+            Spacer()
         }
     }
 
@@ -627,14 +746,16 @@ private struct FeaturedMatchCard: View {
                 record: match.awayRecord,
                 score: match.awayScore,
                 isWinner: awayWon,
-                seriesFormat: match.seriesFormat
+                seriesFormat: match.seriesFormat,
+                logoURL: match.awayLogoURL
             )
             TeamScoreRow(
                 team: match.homeTeam,
                 record: match.homeRecord,
                 score: match.homeScore,
                 isWinner: homeWon,
-                seriesFormat: match.seriesFormat
+                seriesFormat: match.seriesFormat,
+                logoURL: match.homeLogoURL
             )
             HStack {
                 matchStatePill
@@ -688,10 +809,11 @@ private struct TeamScoreRow: View {
     let score: Int
     var isWinner: Bool? = nil
     var seriesFormat: Int? = nil
+    var logoURL: URL? = nil
 
     var body: some View {
         HStack(spacing: 8) {
-            TeamLogoBadge(team: team)
+            TeamLogoBadge(team: team, overrideURL: logoURL)
             Text(team)
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(nameColor)
@@ -746,8 +868,8 @@ private struct CompactMatchCard: View {
                     .foregroundStyle(stateColor)
                 Spacer()
             }
-            CompactTeamRow(team: match.awayTeam, score: match.awayScore, isWinner: awayWon)
-            CompactTeamRow(team: match.homeTeam, score: match.homeScore, isWinner: homeWon)
+            CompactTeamRow(team: match.awayTeam, score: match.awayScore, isWinner: awayWon, logoURL: match.awayLogoURL)
+            CompactTeamRow(team: match.homeTeam, score: match.homeScore, isWinner: homeWon, logoURL: match.homeLogoURL)
             Text(match.subDetail)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.white.opacity(0.62))
@@ -777,10 +899,11 @@ private struct CompactTeamRow: View {
     let team: String
     let score: Int
     var isWinner: Bool? = nil
+    var logoURL: URL? = nil
 
     var body: some View {
         HStack(spacing: 6) {
-            TeamLogoBadge(team: team)
+            TeamLogoBadge(team: team, overrideURL: logoURL)
             Text(team)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(isWinner == false ? .white.opacity(0.40) : .white.opacity(0.90))
@@ -958,13 +1081,13 @@ private struct UpcomingMatchRow: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    TeamLogoBadge(team: match.awayTeam)
+                    TeamLogoBadge(team: match.awayTeam, overrideURL: match.awayLogoURL)
                     Text(match.awayTeam)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                 }
                 HStack(spacing: 6) {
-                    TeamLogoBadge(team: match.homeTeam)
+                    TeamLogoBadge(team: match.homeTeam, overrideURL: match.homeLogoURL)
                     Text(match.homeTeam)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)

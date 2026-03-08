@@ -201,6 +201,11 @@ struct EsportsMatch: Identifiable, Hashable {
     let seriesFormat: Int?  // nil = single map, 3 = Bo3, 5 = Bo5
     let scheduledAt: Date?
     let streamURL: URL?
+    let homeLogoURL: URL?
+    let awayLogoURL: URL?
+    let homeTeamPandaID: Int?
+    let awayTeamPandaID: Int?
+    let eventName: String?
 
     init(
         id: UUID,
@@ -217,7 +222,12 @@ struct EsportsMatch: Identifiable, Hashable {
         isFeatured: Bool,
         seriesFormat: Int? = nil,
         scheduledAt: Date? = nil,
-        streamURL: URL? = nil
+        streamURL: URL? = nil,
+        homeLogoURL: URL? = nil,
+        awayLogoURL: URL? = nil,
+        homeTeamPandaID: Int? = nil,
+        awayTeamPandaID: Int? = nil,
+        eventName: String? = nil
     ) {
         self.id = id
         self.league = league
@@ -234,6 +244,11 @@ struct EsportsMatch: Identifiable, Hashable {
         self.seriesFormat = seriesFormat
         self.scheduledAt = scheduledAt
         self.streamURL = streamURL
+        self.homeLogoURL = homeLogoURL
+        self.awayLogoURL = awayLogoURL
+        self.homeTeamPandaID = homeTeamPandaID
+        self.awayTeamPandaID = awayTeamPandaID
+        self.eventName = eventName
     }
 
     /// Stable notification identifier derived from match content rather than the
@@ -271,4 +286,11 @@ enum OddsTrend: String, Hashable {
     case up
     case down
     case flat
+}
+
+struct RosterPlayer: Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let role: String?
+    let imageURL: URL?
 }

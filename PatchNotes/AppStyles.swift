@@ -626,6 +626,7 @@ struct TagChip: View {
 struct TeamLogoBadge: View {
     let team: String
     var size: CGFloat = 20
+    var overrideURL: URL? = nil
 
     private static let logoURLs: [String: URL] = [
         "Sentinels":     URL(string: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2e/Sentinels_logo.svg/200px-Sentinels_logo.svg.png")!,
@@ -656,7 +657,7 @@ struct TeamLogoBadge: View {
         "OG":            URL(string: "https://upload.wikimedia.org/wikipedia/en/thumb/5/5c/OG_Esports_logo.svg/200px-OG_Esports_logo.svg.png")!,
     ]
 
-    private var logoURL: URL? { Self.logoURLs[team] }
+    private var logoURL: URL? { overrideURL ?? Self.logoURLs[team] }
 
     private var initials: String {
         let letters = team.split(separator: " ").prefix(2).compactMap { $0.first.map(String.init) }.joined()

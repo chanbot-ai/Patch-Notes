@@ -918,10 +918,21 @@ final class AppStore: ObservableObject {
     }
 
     func refreshEsports() async {
-        isLoadingEsports = true
-        try? await Task.sleep(for: .milliseconds(700))
+        // Only show the skeleton on the very first load when there is nothing to display yet.
+        // During pull-to-refresh the native spinner is sufficient; keep existing data visible.
+        let isInitialLoad = esportsMatches.isEmpty
+        isLoadingEsports = isInitialLoad
+
         let seed = dataProvider.makeSeedData(referenceDate: Date())
-        esportsMatches = seed.esportsMatches
+
+        if let apiMatches = try? await PandaScoreService().fetchAllMatches(), !apiMatches.isEmpty {
+            esportsMatches = apiMatches
+        } else if isInitialLoad {
+            // First load with no API data — fall back to seed so the screen isn't blank.
+            esportsMatches = seed.esportsMatches
+        }
+        // On a pull-to-refresh failure, keep whatever was already displayed.
+
         esportsMarkets = seed.esportsMarkets
         leagueStandings = seed.leagueStandings
         isLoadingEsports = false

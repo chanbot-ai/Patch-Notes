@@ -7,6 +7,10 @@ struct MatchDetailView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
+    @State private var homeRoster: [RosterPlayer] = []
+    @State private var awayRoster: [RosterPlayer] = []
+    @State private var rosterIsLoading = false
+
     private var matchMarkets: [EsportsMarket] {
         let teams: Set<String> = [match.homeTeam, match.awayTeam]
         return store.esportsMarkets.filter { market in
@@ -25,6 +29,14 @@ struct MatchDetailView: View {
                     VStack(spacing: 20) {
                         MatchHeaderSection(match: match)
                         TeamFormSection(match: match)
+                        if match.homeTeamPandaID != nil {
+                            RosterSection(
+                                match: match,
+                                homeRoster: homeRoster,
+                                awayRoster: awayRoster,
+                                isLoading: rosterIsLoading
+                            )
+                        }
                         MatchInfoSection(match: match)
                         if !matchMarkets.isEmpty {
                             MarketsSection(markets: matchMarkets)
@@ -33,6 +45,17 @@ struct MatchDetailView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 20)
                 }
+            }
+            .task {
+                guard let homeID = match.homeTeamPandaID,
+                      let awayID = match.awayTeamPandaID else { return }
+                rosterIsLoading = true
+                let service = PandaScoreService()
+                async let homeFetch = service.fetchTeamPlayers(teamID: homeID)
+                async let awayFetch = service.fetchTeamPlayers(teamID: awayID)
+                homeRoster = (try? await homeFetch) ?? []
+                awayRoster = (try? await awayFetch) ?? []
+                rosterIsLoading = false
             }
             .navigationTitle(match.league)
             .navigationBarTitleDisplayMode(.inline)
@@ -54,9 +77,22 @@ private struct MatchHeaderSection: View {
 
     var body: some View {
         VStack(spacing: 16) {
+            if let event = match.eventName {
+                HStack(spacing: 5) {
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                    Text(event)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+
             HStack(alignment: .center, spacing: 0) {
                 VStack(spacing: 8) {
-                    TeamLogoBadge(team: match.awayTeam, size: 52)
+                    TeamLogoBadge(team: match.awayTeam, size: 52, overrideURL: match.awayLogoURL)
                     Text(match.awayTeam)
                         .font(.title3.weight(.black))
                         .foregroundStyle(.white)
@@ -82,7 +118,7 @@ private struct MatchHeaderSection: View {
                 .frame(maxWidth: .infinity)
 
                 VStack(spacing: 8) {
-                    TeamLogoBadge(team: match.homeTeam, size: 52)
+                    TeamLogoBadge(team: match.homeTeam, size: 52, overrideURL: match.homeLogoURL)
                     Text(match.homeTeam)
                         .font(.title3.weight(.black))
                         .foregroundStyle(.white)
@@ -91,7 +127,7 @@ private struct MatchHeaderSection: View {
                 .frame(maxWidth: .infinity)
             }
 
-            if let url = match.streamURL {
+            if match.state == .live, let url = match.streamURL {
                 Link(destination: url) {
                     Label("Watch Live", systemImage: "play.tv.fill")
                         .font(.subheadline.weight(.bold))
@@ -152,12 +188,12 @@ private struct TeamFormSection: View {
                     .foregroundStyle(.white)
 
                 HStack(alignment: .top, spacing: 0) {
-                    TeamFormColumn(team: match.awayTeam, record: match.awayRecord)
+                    TeamFormColumn(team: match.awayTeam, record: match.awayRecord, logoURL: match.awayLogoURL)
                     Rectangle()
                         .fill(Color.white.opacity(0.12))
                         .frame(width: 1)
                         .padding(.vertical, 4)
-                    TeamFormColumn(team: match.homeTeam, record: match.homeRecord)
+                    TeamFormColumn(team: match.homeTeam, record: match.homeRecord, logoURL: match.homeLogoURL)
                 }
             }
         }
@@ -167,12 +203,13 @@ private struct TeamFormSection: View {
 private struct TeamFormColumn: View {
     let team: String
     let record: String
+    var logoURL: URL? = nil
 
     private var form: [Bool] { recentForm(team: team, record: record) }
 
     var body: some View {
         VStack(spacing: 6) {
-            TeamLogoBadge(team: team, size: 32)
+            TeamLogoBadge(team: team, size: 32, overrideURL: logoURL)
             Text(team)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.white)
@@ -242,7 +279,7 @@ private struct MatchInfoSection: View {
                     .foregroundStyle(.white)
 
                 InfoRow(label: "League", value: match.league)
-                InfoRow(label: "Format", value: match.subDetail)
+                InfoRow(label: "Stage", value: match.subDetail)
                 InfoRow(label: "Status", value: match.detailLine)
 
                 if match.state == .upcoming, let date = match.scheduledAt {
@@ -435,6 +472,138 @@ private struct MatchRemindMeButton: View {
             if error == nil {
                 DispatchQueue.main.async { reminderSet = true }
             }
+        }
+    }
+}
+
+// MARK: - Rosters
+
+private struct RosterSection: View {
+    let match: EsportsMatch
+    let homeRoster: [RosterPlayer]
+    let awayRoster: [RosterPlayer]
+    let isLoading: Bool
+
+    var body: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Rosters")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+
+                if isLoading {
+                    HStack {
+                        Spacer()
+                        ProgressView().tint(.white)
+                        Spacer()
+                    }
+                    .padding(.vertical, 16)
+                } else {
+                    HStack(alignment: .top, spacing: 0) {
+                        RosterColumn(
+                            team: match.awayTeam,
+                            players: awayRoster,
+                            logoURL: match.awayLogoURL
+                        )
+                        Rectangle()
+                            .fill(Color.white.opacity(0.12))
+                            .frame(width: 1)
+                            .padding(.vertical, 4)
+                        RosterColumn(
+                            team: match.homeTeam,
+                            players: homeRoster,
+                            logoURL: match.homeLogoURL
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct RosterColumn: View {
+    let team: String
+    let players: [RosterPlayer]
+    var logoURL: URL? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                TeamLogoBadge(team: team, size: 22, overrideURL: logoURL)
+                Text(team)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if players.isEmpty {
+                Text("No data available")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.40))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 2)
+            } else {
+                ForEach(players) { player in
+                    PlayerRow(player: player)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+    }
+}
+
+private struct PlayerRow: View {
+    let player: RosterPlayer
+
+    var body: some View {
+        HStack(spacing: 7) {
+            PlayerAvatar(player: player)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(player.name)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let role = player.role {
+                    Text(role.capitalized)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.50))
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct PlayerAvatar: View {
+    let player: RosterPlayer
+
+    var body: some View {
+        Group {
+            if let url = player.imageURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
+                        initialsPlaceholder
+                    }
+                }
+            } else {
+                initialsPlaceholder
+            }
+        }
+        .frame(width: 28, height: 28)
+        .clipShape(Circle())
+    }
+
+    private var initialsPlaceholder: some View {
+        ZStack {
+            Circle().fill(Color.white.opacity(0.14))
+            Text(String(player.name.prefix(1)).uppercased())
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white.opacity(0.80))
         }
     }
 }
