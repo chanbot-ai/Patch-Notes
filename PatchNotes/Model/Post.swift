@@ -24,6 +24,7 @@ struct Post: Identifiable, Decodable {
     let author_display_name: String?
     let author_avatar_url: String?
     let author_created_at: Date?
+    let author_is_bot: Bool?
     let source_kind: String?
     let source_provider: String?
     let source_external_id: String?
@@ -71,7 +72,19 @@ struct Post: Identifiable, Decodable {
     }
 
     var isExternalSource: Bool {
-        sourceKindRaw == "external" || sourceProviderRaw != nil || sourceURL != nil
+        // Curated posts are rewritten originals — no attribution
+        guard sourceKindRaw != "curated" else { return false }
+        return sourceKindRaw == "external" || sourceProviderRaw != nil || sourceURL != nil
+    }
+
+    var viaAttributionLabel: String? {
+        // Curated posts have no attribution
+        guard sourceKindRaw == "bot" else { return nil }
+        switch sourceProviderRaw {
+        case "reddit": return "via Reddit"
+        case "twitterapi.io": return "via X"
+        default: return sourceProviderRaw.map { "via \($0)" }
+        }
     }
 
     var sourceProviderDisplayName: String? {
@@ -79,6 +92,8 @@ struct Post: Identifiable, Decodable {
             switch provider {
             case "twitterapi.io":
                 return "X"
+            case "reddit":
+                return "Reddit"
             default:
                 return provider
             }
@@ -116,7 +131,7 @@ struct Post: Identifiable, Decodable {
             display_name: author_display_name,
             avatar_url: author_avatar_url,
             created_at: author_created_at,
-            is_bot: nil,
+            is_bot: author_is_bot,
             avatar_slug: nil
         )
     }

@@ -47,6 +47,8 @@
 		F00000000000000000000013 /* MilestoneBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000003 /* MilestoneBadge.swift */; };
 		F00000000000000000000014 /* BadgeManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000004 /* BadgeManagementView.swift */; };
 		F00000000000000000000015 /* ProfileDrawerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000005 /* ProfileDrawerView.swift */; };
+		G00000000000000000000011 /* StoreKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = G00000000000000000000001 /* StoreKitManager.swift */; };
+		G00000000000000000000012 /* SubscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = G00000000000000000000002 /* SubscriptionView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -90,6 +92,9 @@
 		F00000000000000000000003 /* MilestoneBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MilestoneBadge.swift; sourceTree = "<group>"; };
 		F00000000000000000000004 /* BadgeManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BadgeManagementView.swift; sourceTree = "<group>"; };
 		F00000000000000000000005 /* ProfileDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileDrawerView.swift; sourceTree = "<group>"; };
+		G00000000000000000000001 /* StoreKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitManager.swift; sourceTree = "<group>"; };
+		G00000000000000000000002 /* SubscriptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionView.swift; sourceTree = "<group>"; };
+		G00000000000000000000003 /* Configuration.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Configuration.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -128,6 +133,7 @@
 				A00000000000000000000013 /* AppStyles.swift */,
 				A0000000000000000000001C /* SupabaseManager.swift */,
 				A00000000000000000000021 /* AuthManager.swift */,
+				G00000000000000000000001 /* StoreKitManager.swift */,
 				A0000000000000000000001E /* FeedService.swift */,
 				A00000000000000000000025 /* PublicProfileService.swift */,
 				A00000000000000000000007 /* Feed */,
@@ -135,6 +141,7 @@
 				A00000000000000000000005 /* Views */,
 				A00000000000000000000006 /* Model */,
 				C00000000000000000000002 /* PreviewHelpers.swift */,
+				G00000000000000000000003 /* Configuration.storekit */,
 				A0000000000000000000001B /* Assets.xcassets */,
 			);
 			path = PatchNotes;
@@ -162,6 +169,7 @@
 				F00000000000000000000002 /* AvatarSelectionView.swift */,
 				F00000000000000000000004 /* BadgeManagementView.swift */,
 				F00000000000000000000005 /* ProfileDrawerView.swift */,
+				G00000000000000000000002 /* SubscriptionView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -319,6 +327,8 @@
 				F00000000000000000000013 /* MilestoneBadge.swift in Sources */,
 				F00000000000000000000014 /* BadgeManagementView.swift in Sources */,
 				F00000000000000000000015 /* ProfileDrawerView.swift in Sources */,
+				G00000000000000000000011 /* StoreKitManager.swift in Sources */,
+				G00000000000000000000012 /* SubscriptionView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

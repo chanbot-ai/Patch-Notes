@@ -7,6 +7,8 @@ struct AvatarSelectionView: View {
     var milestones: UserMilestones? = nil
     var initialSlug: String? = nil
 
+    @EnvironmentObject private var storeKitManager: StoreKitManager
+
     @State private var selectedSlug: String = "gamer_1"
     @State private var didSetInitial = false
 
@@ -117,7 +119,7 @@ struct AvatarSelectionView: View {
     @ViewBuilder
     private func avatarCell(_ avatar: AvatarOption) -> some View {
         let isSelected = selectedSlug == avatar.slug
-        let isUnlocked = AvatarCatalog.isUnlocked(avatar, milestones: milestones)
+        let isUnlocked = AvatarCatalog.isUnlocked(avatar, milestones: milestones, isPremium: storeKitManager.isPremium)
         let isLocked = avatar.isLocked && !isUnlocked
 
         Button {

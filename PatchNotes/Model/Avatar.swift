@@ -112,7 +112,7 @@ enum AvatarCatalog {
         return avatar(for: slug)?.emoji ?? "🎮"
     }
 
-    static func isUnlocked(_ avatar: AvatarOption, milestones: UserMilestones?) -> Bool {
+    static func isUnlocked(_ avatar: AvatarOption, milestones: UserMilestones?, isPremium: Bool = false) -> Bool {
         guard avatar.isLocked, let req = avatar.unlockRequirement else { return true }
         switch req {
         case .milestone(let key, let threshold):
@@ -125,7 +125,7 @@ enum AvatarCatalog {
                 return (m.comments_posted + m.replies_posted + m.reactions_given) >= threshold
             }
         case .premium:
-            return false // PN Pro not yet available
+            return isPremium
         }
     }
 
