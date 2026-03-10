@@ -37,17 +37,24 @@ interface BotSource {
 }
 
 const REDDIT_USER_AGENT = "PatchNotes/1.0 (Bot Content Pipeline)";
-const MIN_SCORE = 50; // Minimum upvotes to consider
+const MIN_SCORE = 10; // Minimum upvotes to consider
 const POSTS_PER_SUBREDDIT = 5;
 
 async function fetchSubredditHot(subreddit: string): Promise<RedditPost[]> {
-  const url = `https://www.reddit.com/r/${subreddit}/hot.json?limit=${POSTS_PER_SUBREDDIT * 2}&raw_json=1`;
-  const resp = await fetch(url, {
-    headers: { "User-Agent": REDDIT_USER_AGENT },
-  });
+  // Use oauth.reddit.com if we have credentials, otherwise old.reddit.com
+  // (www.reddit.com blocks datacenter IPs like Supabase edge)
+  const accessToken = Deno.env.get("REDDIT_ACCESS_TOKEN");
+  const url = accessToken
+    ? `https://oauth.reddit.com/r/${subreddit}/hot?limit=${POSTS_PER_SUBREDDIT * 2}&raw_json=1`
+    : `https://old.reddit.com/r/${subreddit}/hot.json?limit=${POSTS_PER_SUBREDDIT * 2}&raw_json=1`;
+  const headers: Record<string, string> = { "User-Agent": REDDIT_USER_AGENT };
+  if (accessToken) {
+    headers["Authorization"] = `Bearer ${accessToken}`;
+  }
+  const resp = await fetch(url, { headers });
 
   if (!resp.ok) {
-    console.error(`Reddit API error for r/${subreddit}: ${resp.status}`);
+    console.error(`Reddit API error for r/${subreddit}: ${resp.status} ${resp.statusText}`);
     return [];
   }
 
@@ -139,6 +146,18 @@ function redditPostToAppPost(
 }
 
 Deno.serve(async (req) => {
+  // Cron secret validation (matches syncTweets pattern)
+  const cronSecret = Deno.env.get("FETCH_REDDIT_WEBHOOK_SECRET");
+  if (cronSecret) {
+    const reqSecret = req.headers.get("x-cron-secret");
+    if (reqSecret !== cronSecret) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -174,12 +193,14 @@ Deno.serve(async (req) => {
 
     let totalCreated = 0;
     let totalSkipped = 0;
+    let totalFetched = 0;
     const errors: string[] = [];
 
     // 2. Process each bot source
     for (const source of botSources) {
       try {
         const posts = await fetchSubredditHot(source.source_identifier);
+        totalFetched += posts.length;
         console.log(
           `r/${source.source_identifier}: fetched ${posts.length} qualifying posts`,
         );
@@ -258,6 +279,7 @@ Deno.serve(async (req) => {
         sourcesProcessed: botSources.length,
         postsCreated: totalCreated,
         postsSkipped: totalSkipped,
+        postsFetchedFromReddit: totalFetched,
         errors,
       }),
       { headers: { "Content-Type": "application/json" } },
