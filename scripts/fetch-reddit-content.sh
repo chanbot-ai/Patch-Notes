@@ -9,8 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$SCRIPT_DIR/../logs/fetch-reddit.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
-SUPABASE_URL="https://lvapccwqypcvhijmevbh.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx2YXBjY3dxeXBjdmhpam1ldmJoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTczODYxMSwiZXhwIjoyMDg3MzE0NjExfQ.MPZ25x9ZDxgIG2jKdv1HrhV4I7jPsSFA_8DKORH8zdo"
+SUPABASE_URL="${SUPABASE_URL:?Set SUPABASE_URL env var}"
+SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY:?Set SUPABASE_SERVICE_ROLE_KEY env var}"
 
 REDDIT_USER_AGENT="PatchNotes/1.0 (Local Bot Content Pipeline)"
 MIN_SCORE=10

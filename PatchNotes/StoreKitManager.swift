@@ -7,7 +7,7 @@ final class StoreKitManager: ObservableObject {
     @Published private(set) var purchasedProductIDs: Set<String> = []
     @Published private(set) var isPremium: Bool = false
     @Published private(set) var isLoading: Bool = false
-    @Published private(set) var errorMessage: String?
+    @Published var errorMessage: String?
 
     private let productIDs: Set<String> = ["pn_pro_monthly", "pn_pro_annual"]
     private var transactionListener: Task<Void, Never>?

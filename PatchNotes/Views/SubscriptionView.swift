@@ -99,7 +99,11 @@ struct SubscriptionView: View {
     private func planCard(product: Product, badge: String?) -> some View {
         Button {
             Task {
-                try? await storeKitManager.purchase(product)
+                do {
+                    try await storeKitManager.purchase(product)
+                } catch {
+                    storeKitManager.errorMessage = "Purchase failed. Please try again."
+                }
             }
         } label: {
             GlassCard {

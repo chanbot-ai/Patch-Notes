@@ -148,14 +148,18 @@ function redditPostToAppPost(
 Deno.serve(async (req) => {
   // Cron secret validation (matches syncTweets pattern)
   const cronSecret = Deno.env.get("FETCH_REDDIT_WEBHOOK_SECRET");
-  if (cronSecret) {
-    const reqSecret = req.headers.get("x-cron-secret");
-    if (reqSecret !== cronSecret) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+  if (!cronSecret) {
+    return new Response(JSON.stringify({ error: "FETCH_REDDIT_WEBHOOK_SECRET not configured" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  const reqSecret = req.headers.get("x-cron-secret");
+  if (reqSecret !== cronSecret) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   try {

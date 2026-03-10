@@ -544,6 +544,15 @@ async function fetchContent(env: Env): Promise<PipelineResult> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // Require service role key as bearer token to prevent unauthenticated access
+    const authHeader = request.headers.get("Authorization");
+    if (authHeader !== `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     const result = await fetchContent(env);
     return new Response(JSON.stringify(result, null, 2), {
       headers: { "Content-Type": "application/json" },
