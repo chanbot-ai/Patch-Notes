@@ -21,8 +21,7 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 supabase_get() {
   local table="$1" params="$2"
   curl -s "${SUPABASE_URL}/rest/v1/${table}?${params}" \
-    -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-    -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}"
+    -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}"
 }
 
 supabase_post() {
@@ -30,7 +29,6 @@ supabase_post() {
   curl -s "${SUPABASE_URL}/rest/v1/${table}" \
     -X POST \
     -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-    -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
     -H "Content-Type: application/json" \
     -H "Prefer: return=representation" \
     -d "$body"
@@ -41,7 +39,6 @@ supabase_patch() {
   curl -s "${SUPABASE_URL}/rest/v1/${table}?${params}" \
     -X PATCH \
     -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-    -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
     -H "Content-Type: application/json" \
     -d "$body"
 }
@@ -76,7 +73,6 @@ POSTS_PER_SUB = ${POSTS_PER_SUBREDDIT}
 
 headers_sb = {
     'apikey': SERVICE_KEY,
-    'Authorization': f'Bearer {SERVICE_KEY}',
     'Content-Type': 'application/json',
     'Prefer': 'return=representation'
 }

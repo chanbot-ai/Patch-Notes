@@ -85,7 +85,6 @@ const BATCH_SIZE = 4;
 function sbHeaders(key: string): Record<string, string> {
   return {
     apikey: key,
-    Authorization: `Bearer ${key}`,
     "Content-Type": "application/json",
     Prefer: "return=representation",
   };
