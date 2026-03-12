@@ -3,8 +3,8 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
 [triggers]
-# Runs every 5 minutes, processing 4 sources per batch.
-# All 72+ sources refresh within ~90 minutes.
+# Runs every 5 minutes, processing 2 sources per batch.
+# All 72+ sources refresh within ~3 hours.
 crons = ["*/5 * * * *"]
 
 [vars]
