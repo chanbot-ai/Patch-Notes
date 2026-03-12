@@ -102,8 +102,13 @@ struct FeedPostRow: View {
                     .onTapGesture { onOpenComments() }
             }
 
-            // MARK: - External source meta
-            if post.isExternalSource {
+            // MARK: - Source attribution
+            if let viaLabel = post.viaAttributionLabel {
+                Text(viaLabel)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.40))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if post.isExternalSource {
                 PostSourceMetaRow(post: post)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }

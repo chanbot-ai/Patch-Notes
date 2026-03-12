@@ -1,0 +1,223 @@
+name: Fetch Reddit Content
+
+on:
+  schedule:
+    - cron: "*/30 * * * *" # Every 30 minutes
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch Reddit posts and push to Supabase
+        uses: actions/github-script@v7
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        with:
+          script: |
+            const REDDIT_USER_AGENT = "PatchNotes/1.0 (GitHub Actions Bot Pipeline)";
+            const MIN_SCORE = 10;
+            const POSTS_PER_SUBREDDIT = 5;
+            const SUPABASE_URL = process.env.SUPABASE_URL;
+            const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+            if (!SUPABASE_URL || !SERVICE_KEY) {
+              core.setFailed("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY secrets");
+              return;
+            }
+
+            const supabaseHeaders = {
+              "apikey": SERVICE_KEY,
+              "Authorization": `Bearer ${SERVICE_KEY}`,
+              "Content-Type": "application/json",
+              "Prefer": "return=representation"
+            };
+
+            // -- Helpers --
+
+            async function supabaseGet(table, params = "") {
+              const resp = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
+                headers: supabaseHeaders
+              });
+              if (!resp.ok) throw new Error(`Supabase GET ${table}: ${resp.status} ${await resp.text()}`);
+              return resp.json();
+            }
+
+            async function supabaseInsert(table, row) {
+              const resp = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+                method: "POST",
+                headers: supabaseHeaders,
+                body: JSON.stringify(row)
+              });
+              if (!resp.ok) {
+                const text = await resp.text();
+                throw new Error(`Supabase INSERT ${table}: ${resp.status} ${text}`);
+              }
+              return resp.json();
+            }
+
+            async function supabasePatch(table, params, body) {
+              const resp = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
+                method: "PATCH",
+                headers: supabaseHeaders,
+                body: JSON.stringify(body)
+              });
+              if (!resp.ok) {
+                const text = await resp.text();
+                throw new Error(`Supabase PATCH ${table}: ${resp.status} ${text}`);
+              }
+            }
+
+            async function fetchSubredditHot(subreddit) {
+              const url = `https://www.reddit.com/r/${subreddit}/hot.json?limit=${POSTS_PER_SUBREDDIT * 2}&raw_json=1`;
+              const resp = await fetch(url, {
+                headers: { "User-Agent": REDDIT_USER_AGENT }
+              });
+
+              if (!resp.ok) {
+                console.log(`Reddit API error for r/${subreddit}: ${resp.status} ${resp.statusText}`);
+                return [];
+              }
+
+              const data = await resp.json();
+              return (data?.data?.children ?? [])
+                .map(child => child.data)
+                .filter(post => !post.is_self || (post.selftext && post.selftext.length > 20))
+                .filter(post => post.score >= MIN_SCORE)
+                .slice(0, POSTS_PER_SUBREDDIT);
+            }
+
+            function extractMediaUrl(post) {
+              if (post.preview?.images?.[0]?.source?.url) {
+                return post.preview.images[0].source.url;
+              }
+              if (post.thumbnail && post.thumbnail.startsWith("http") &&
+                  !post.thumbnail.includes("self") && !post.thumbnail.includes("default")) {
+                return post.thumbnail;
+              }
+              if (/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(post.url)) {
+                return post.url;
+              }
+              return null;
+            }
+
+            function redditPostToAppPost(post, botUserId, gameId) {
+              const mediaUrl = extractMediaUrl(post);
+              const body = post.is_self
+                ? (post.selftext || "").slice(0, 2000)
+                : (post.url && !mediaUrl ? post.url : null);
+
+              return {
+                author_id: botUserId,
+                game_id: gameId,
+                type: mediaUrl ? "image" : "news",
+                title: post.title.slice(0, 300),
+                body: body,
+                media_url: mediaUrl,
+                thumbnail_url: post.thumbnail?.startsWith("http") ? post.thumbnail : null,
+                is_system_generated: true,
+                source_kind: "bot",
+                source_provider: "reddit",
+                source_external_id: `reddit_${post.id}`,
+                source_handle: `r/${post.subreddit}`,
+                source_url: `https://reddit.com${post.permalink}`,
+                source_published_at: new Date(post.created_utc * 1000).toISOString(),
+                source_metadata: {
+                  reddit_score: post.score,
+                  reddit_comments: post.num_comments,
+                  reddit_author: post.author,
+                  reddit_flair: post.link_flair_text ?? null,
+                  reddit_domain: post.domain
+                }
+              };
+            }
+
+            // -- Main --
+
+            const sources = await supabaseGet(
+              "bot_content_sources",
+              "source_type=eq.reddit&is_active=eq.true&select=id,bot_user_id,source_type,source_identifier,game_id,last_fetched_at"
+            );
+
+            console.log(`Found ${sources.length} active Reddit bot sources`);
+
+            let totalCreated = 0;
+            let totalSkipped = 0;
+            let totalFetched = 0;
+            const errors = [];
+
+            for (const source of sources) {
+              try {
+                const posts = await fetchSubredditHot(source.source_identifier);
+                totalFetched += posts.length;
+                console.log(`r/${source.source_identifier}: fetched ${posts.length} qualifying posts`);
+
+                for (const post of posts) {
+                  const externalId = `reddit_${post.id}`;
+
+                  // Check dedup
+                  const existing = await supabaseGet(
+                    "bot_post_log",
+                    `source_external_id=eq.${externalId}&select=id&limit=1`
+                  );
+
+                  if (existing.length > 0) {
+                    totalSkipped++;
+                    continue;
+                  }
+
+                  const appPost = redditPostToAppPost(post, source.bot_user_id, source.game_id);
+
+                  // Insert post
+                  let insertedPost;
+                  try {
+                    const result = await supabaseInsert("posts", appPost);
+                    insertedPost = Array.isArray(result) ? result[0] : result;
+                  } catch (err) {
+                    console.log(`Failed to insert "${post.title}": ${err.message}`);
+                    errors.push(`r/${source.source_identifier}: ${err.message}`);
+                    continue;
+                  }
+
+                  // Log for dedup
+                  try {
+                    await supabaseInsert("bot_post_log", {
+                      bot_user_id: source.bot_user_id,
+                      source_type: "reddit",
+                      source_external_id: externalId,
+                      post_id: insertedPost.id
+                    });
+                  } catch (err) {
+                    console.log(`Failed to log dedup for "${post.title}": ${err.message}`);
+                  }
+
+                  totalCreated++;
+                }
+
+                // Update last_fetched_at
+                await supabasePatch(
+                  "bot_content_sources",
+                  `id=eq.${source.id}`,
+                  { last_fetched_at: new Date().toISOString() }
+                );
+
+                // Small delay between subreddits to be polite to Reddit
+                await new Promise(r => setTimeout(r, 1000));
+
+              } catch (err) {
+                const msg = `r/${source.source_identifier}: ${err.message}`;
+                console.log(msg);
+                errors.push(msg);
+              }
+            }
+
+            console.log(`\nResults:`);
+            console.log(`  Sources processed: ${sources.length}`);
+            console.log(`  Posts fetched from Reddit: ${totalFetched}`);
+            console.log(`  Posts created: ${totalCreated}`);
+            console.log(`  Posts skipped (dedup): ${totalSkipped}`);
+            if (errors.length > 0) {
+              console.log(`  Errors: ${errors.join(", ")}`);
+            }

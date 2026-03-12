@@ -1,4 +1,5 @@
 import SwiftUI
+import StoreKit
 
 struct RootTabView: View {
     @EnvironmentObject private var settings: AppSettings
@@ -76,7 +77,10 @@ private struct IOSTabBarGlassModifier: ViewModifier {
 
 struct SettingsSheetView: View {
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var storeKitManager: StoreKitManager
     @Environment(\.dismiss) private var dismiss
+
+    @State private var showSubscriptionSheet = false
 
     var body: some View {
         NavigationStack {
@@ -120,16 +124,29 @@ struct SettingsSheetView: View {
                 }
 
                 Section("PN Pro Membership") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Upgrade to remove ads and unlock deeper customization.")
-                            .font(.subheadline)
-                        Text("Monthly: $7.99 · Annual: $69.99")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    if storeKitManager.isPremium {
+                        HStack(spacing: 8) {
+                            Image(systemName: "crown.fill")
+                                .foregroundStyle(AppTheme.accent)
+                            Text("PN Pro Active")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Upgrade to remove ads and unlock deeper customization.")
+                                .font(.subheadline)
+                            Text("Monthly: $7.99 · Annual: $69.99")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
-                    Button("Upgrade to PN Pro") {}
-                    Button("Compare Plans") {}
+                        Button("Upgrade to PN Pro") {
+                            showSubscriptionSheet = true
+                        }
+                        Button("Compare Plans") {
+                            showSubscriptionSheet = true
+                        }
+                    }
                 }
 
                 Section("Legal") {
@@ -154,6 +171,9 @@ struct SettingsSheetView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showSubscriptionSheet) {
+                SubscriptionView()
+            }
         }
     }
 }
@@ -165,7 +185,6 @@ private struct AccountManagementView: View {
 
     @State private var isSigningOut = false
     @State private var signOutErrorMessage: String?
-    @State private var showSubscriptionAlert = false
 
     var body: some View {
         Form {
@@ -193,7 +212,11 @@ private struct AccountManagementView: View {
 
             Section("Account") {
                 Button("Manage Subscription") {
-                    showSubscriptionAlert = true
+                    Task {
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                            try? await StoreKit.AppStore.showManageSubscriptions(in: windowScene)
+                        }
+                    }
                 }
 
                 Button(isSigningOut ? "Signing Out..." : "Sign Out") {
@@ -210,11 +233,6 @@ private struct AccountManagementView: View {
             }
         }
         .navigationTitle("Account")
-        .alert("Manage Subscription", isPresented: $showSubscriptionAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("PN Pro subscription management is not wired yet. We can connect this to App Store subscriptions next.")
-        }
     }
 
     private func signOut() {

@@ -45,6 +45,7 @@ enum PreviewHelpers {
             author_display_name: authorDisplayName,
             author_avatar_url: nil,
             author_created_at: Date(timeIntervalSinceReferenceDate: 750_000_000),
+            author_is_bot: nil,
             source_kind: nil,
             source_provider: nil,
             source_external_id: nil,

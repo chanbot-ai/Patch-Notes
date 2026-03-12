@@ -13,3 +13,9 @@ DerivedData/
 .env.supabase.local
 tools/bin/
 supabase/.temp/
+
+# Node / Cloudflare Worker
+node_modules/
+
+# Logs
+logs/

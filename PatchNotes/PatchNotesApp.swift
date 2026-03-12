@@ -5,6 +5,7 @@ struct PatchNotesApp: App {
     @StateObject private var store = AppStore()
     @StateObject private var settings = AppSettings()
     @StateObject private var authManager = AuthManager()
+    @StateObject private var storeKitManager = StoreKitManager()
 
     private var authSessionSyncKey: String {
         let userID = authManager.session?.user.id.uuidString ?? "no-user"
@@ -24,6 +25,7 @@ struct PatchNotesApp: App {
                 .environmentObject(store)
                 .environmentObject(settings)
                 .environmentObject(authManager)
+                .environmentObject(storeKitManager)
                 .onAppear {
                     store.setAuthenticatedSession(authManager.session)
                     guard authManager.session != nil else { return }

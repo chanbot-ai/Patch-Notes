@@ -1,0 +1,13 @@
+{
+  "name": "patchnotes-reddit-fetcher",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260310.1",
+    "wrangler": "^4"
+  }
+}
