@@ -145,9 +145,14 @@ async function rewriteContent(
   title: string,
   body: string | null,
   sourceProvider: string,
-): Promise<{ title: string; body: string | null; skip: boolean }> {
+  gameTitles: string[],
+): Promise<{ title: string; body: string | null; skip: boolean; game: string | null }> {
   try {
-    const prompt = `You are a gaming news editor for a social app called PatchNotes. Your job is to decide if a post is relevant to gamers, and if so, rewrite it.
+    const gameListStr = gameTitles.length > 0
+      ? `\n\nKNOWN GAMES (pick the closest match if the post is about one of these, or null if none match or if the post is about gaming in general):\n${gameTitles.join(", ")}`
+      : "";
+
+    const prompt = `You are a gaming news editor for a social app called PatchNotes. Your job is to decide if a post is relevant to gamers, rewrite it, and identify which game it's about.
 
 RULES:
 1. REJECT posts about hardware deals, tech accessories, monitors, peripherals, non-gaming merchandise, or anything not directly about video games, game studios, esports, or the gaming industry. Set "skip": true for these.
@@ -156,15 +161,16 @@ RULES:
 4. If a specific source, journalist, or insider is mentioned, credit them inline (e.g., "According to IGN..." or "Insider Tom Henderson reports...").
 5. Do not add hashtags, emojis, links, or URLs. Do not start with "RT" or reference tweets.
 6. Preserve all factual claims and key details. Do not editorialize or add opinions.
+7. Set "game" to the exact game title from the KNOWN GAMES list if the post is primarily about that game. Set null if no match or if it's general gaming news.${gameListStr}
 
 SOURCE POST:
 TITLE: ${title}
 ${body ? `BODY: ${body.slice(0, 500)}` : ""}
 
 Respond in this exact JSON format only, no other text:
-{"skip": false, "title": "rewritten title here", "body": "rewritten body here or null if no body needed"}
+{"skip": false, "title": "rewritten title here", "body": "rewritten body here or null if no body needed", "game": "exact game title or null"}
 Or if the post should be rejected:
-{"skip": true, "title": "", "body": null}`;
+{"skip": true, "title": "", "body": null, "game": null}`;
 
     const result = await ai.run("@cf/meta/llama-3.1-8b-instruct", {
       messages: [{ role: "user", content: prompt }],
@@ -180,19 +186,20 @@ Or if the post should be rejected:
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       if (parsed.skip === true) {
-        return { title: "", body: null, skip: true };
+        return { title: "", body: null, skip: true, game: null };
       }
       return {
         title: (parsed.title as string)?.slice(0, 300) || title,
         body: parsed.body || null,
         skip: false,
+        game: parsed.game || null,
       };
     }
   } catch (err) {
     console.log(`AI rewrite failed, using original: ${(err as Error).message}`);
   }
   // Fallback: return original content
-  return { title, body, skip: false };
+  return { title, body, skip: false, game: null };
 }
 
 // -- Reddit helpers --
@@ -397,6 +404,8 @@ async function processSource(
   env: Env,
   source: BotSource,
   result: PipelineResult,
+  gameTitles: string[],
+  gameMap: Map<string, string>,
 ): Promise<void> {
   const isTwitter = source.source_type === "twitter";
   const isReddit = source.source_type === "reddit";
@@ -474,12 +483,13 @@ async function processSource(
       continue;
     }
 
-    // Rewrite with AI (may skip non-gaming content)
+    // Rewrite with AI (may skip non-gaming content, may tag a game)
     const rewritten = await rewriteContent(
       env.AI,
       item.originalTitle,
       item.originalBody,
       item.provider,
+      source.game_id ? [] : gameTitles, // Only pass game list for game-agnostic sources
     );
 
     if (rewritten.skip) {
@@ -489,6 +499,15 @@ async function processSource(
     }
 
     const appPost = item.buildPost(rewritten);
+
+    // AI game-tagging: override game_id if source is game-agnostic and AI identified a game
+    if (!source.game_id && rewritten.game) {
+      const matchedGameId = gameMap.get(rewritten.game.toLowerCase());
+      if (matchedGameId) {
+        appPost.game_id = matchedGameId;
+        console.log(`AI tagged "${rewritten.title.slice(0, 50)}" → ${rewritten.game}`);
+      }
+    }
 
     try {
       const inserted = await sbInsert(env, "posts", appPost);
@@ -527,6 +546,16 @@ async function processSource(
 }
 
 async function fetchContent(env: Env): Promise<PipelineResult> {
+  // Load game catalog for AI game-tagging (1 subrequest, cached for the batch)
+  const gamesRaw = (await sbGet(
+    env,
+    "games",
+    "select=id,title&order=title.asc",
+  )) as Array<{ id: string; title: string }>;
+  const gameMap = new Map(gamesRaw.map((g) => [g.title.toLowerCase(), g.id]));
+  const gameTitles = gamesRaw.map((g) => g.title);
+  console.log(`Loaded ${gameTitles.length} games for AI tagging`);
+
   // Fetch oldest-refreshed sources first (both reddit and twitter),
   // limited to BATCH_SIZE to stay within Cloudflare's 50 subrequest limit.
   const sources = (await sbGet(
@@ -549,7 +578,7 @@ async function fetchContent(env: Env): Promise<PipelineResult> {
 
   for (const source of sources) {
     try {
-      await processSource(env, source, result);
+      await processSource(env, source, result, gameTitles, gameMap);
     } catch (err) {
       const msg = `${source.source_type}/${source.source_identifier}: ${(err as Error).message}`;
       console.log(msg);
