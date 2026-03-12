@@ -76,9 +76,9 @@ const POSTS_PER_SUBREDDIT = 5;
 const TWEETS_PER_HANDLE = 5;
 const MIN_LIKES = 50;
 // Cloudflare free tier allows 50 subrequests per invocation.
-// Each source uses ~6 requests (1 fetch + ~3 dedup + ~1 insert + 1 patch).
-// 4 sources per batch stays safely under 50.
-const BATCH_SIZE = 4;
+// Each source uses ~10 requests (1 fetch + ~3 dedup + ~3 AI rewrite + ~2 insert + 1 patch).
+// 2 sources per batch stays safely under 50.
+const BATCH_SIZE = 2;
 
 // -- Supabase helpers --
 
@@ -145,19 +145,30 @@ async function rewriteContent(
   title: string,
   body: string | null,
   sourceProvider: string,
-): Promise<{ title: string; body: string | null }> {
+): Promise<{ title: string; body: string | null; skip: boolean }> {
   try {
-    const prompt = `You are a gaming news editor for a social app called PatchNotes. Rewrite the following ${sourceProvider} post as a short, original-sounding news update. Keep it concise and punchy. If a specific source, journalist, or insider is mentioned, credit them inline (e.g., "According to IGN..." or "Insider Tom Henderson reports..."). Do not add hashtags, emojis, or links. Preserve all factual claims and key details. Do not editorialize or add opinions.
+    const prompt = `You are a gaming news editor for a social app called PatchNotes. Your job is to decide if a post is relevant to gamers, and if so, rewrite it.
 
+RULES:
+1. REJECT posts about hardware deals, tech accessories, monitors, peripherals, non-gaming merchandise, or anything not directly about video games, game studios, esports, or the gaming industry. Set "skip": true for these.
+2. Rewrite accepted posts as short, original-sounding gaming news updates. Write COMPLETE sentences — never cut off mid-sentence or use ellipsis.
+3. Keep it concise and punchy (2-4 sentences max for body).
+4. If a specific source, journalist, or insider is mentioned, credit them inline (e.g., "According to IGN..." or "Insider Tom Henderson reports...").
+5. Do not add hashtags, emojis, links, or URLs. Do not start with "RT" or reference tweets.
+6. Preserve all factual claims and key details. Do not editorialize or add opinions.
+
+SOURCE POST:
 TITLE: ${title}
 ${body ? `BODY: ${body.slice(0, 500)}` : ""}
 
 Respond in this exact JSON format only, no other text:
-{"title": "rewritten title here", "body": "rewritten body here or null if no body needed"}`;
+{"skip": false, "title": "rewritten title here", "body": "rewritten body here or null if no body needed"}
+Or if the post should be rejected:
+{"skip": true, "title": "", "body": null}`;
 
     const result = await ai.run("@cf/meta/llama-3.1-8b-instruct", {
       messages: [{ role: "user", content: prompt }],
-      max_tokens: 300,
+      max_tokens: 500,
     });
 
     const text =
@@ -168,16 +179,20 @@ Respond in this exact JSON format only, no other text:
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.skip === true) {
+        return { title: "", body: null, skip: true };
+      }
       return {
         title: (parsed.title as string)?.slice(0, 300) || title,
         body: parsed.body || null,
+        skip: false,
       };
     }
   } catch (err) {
     console.log(`AI rewrite failed, using original: ${(err as Error).message}`);
   }
   // Fallback: return original content
-  return { title, body };
+  return { title, body, skip: false };
 }
 
 // -- Reddit helpers --
@@ -459,13 +474,19 @@ async function processSource(
       continue;
     }
 
-    // Rewrite with AI
+    // Rewrite with AI (may skip non-gaming content)
     const rewritten = await rewriteContent(
       env.AI,
       item.originalTitle,
       item.originalBody,
       item.provider,
     );
+
+    if (rewritten.skip) {
+      console.log(`Skipped non-gaming content: "${item.originalTitle.slice(0, 80)}"`);
+      result.postsSkipped++;
+      continue;
+    }
 
     const appPost = item.buildPost(rewritten);
 
