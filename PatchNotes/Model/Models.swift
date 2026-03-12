@@ -206,6 +206,8 @@ struct EsportsMatch: Identifiable, Hashable {
     let homeTeamPandaID: Int?
     let awayTeamPandaID: Int?
     let eventName: String?
+    let games: [MatchGame]
+    let pandaScoreMatchID: Int?
 
     init(
         id: UUID,
@@ -227,7 +229,9 @@ struct EsportsMatch: Identifiable, Hashable {
         awayLogoURL: URL? = nil,
         homeTeamPandaID: Int? = nil,
         awayTeamPandaID: Int? = nil,
-        eventName: String? = nil
+        eventName: String? = nil,
+        games: [MatchGame] = [],
+        pandaScoreMatchID: Int? = nil
     ) {
         self.id = id
         self.league = league
@@ -249,6 +253,8 @@ struct EsportsMatch: Identifiable, Hashable {
         self.homeTeamPandaID = homeTeamPandaID
         self.awayTeamPandaID = awayTeamPandaID
         self.eventName = eventName
+        self.games = games
+        self.pandaScoreMatchID = pandaScoreMatchID
     }
 
     /// Stable notification identifier derived from match content rather than the
@@ -293,4 +299,47 @@ struct RosterPlayer: Identifiable, Hashable {
     let name: String
     let role: String?
     let imageURL: URL?
+}
+
+struct PlayerDetails {
+    let id: Int
+    let name: String
+    let firstName: String?
+    let lastName: String?
+    let nationality: String?
+    let hometown: String?
+    let age: Int?
+    let imageURL: URL?
+    let role: String?
+    let currentTeamName: String?
+    let currentTeamLogoURL: URL?
+}
+
+enum GameStatus: Hashable {
+    case finished
+    case running
+    case notStarted
+}
+
+struct MatchGame: Identifiable, Hashable {
+    let id: Int
+    let position: Int
+    let status: GameStatus
+    let winnerID: Int?
+    let lengthSeconds: Int?
+}
+
+struct H2HRecord {
+    /// Wins for the home team (team1 in the fetch call)
+    let homeWins: Int
+    /// Wins for the away team (team2 in the fetch call)
+    let awayWins: Int
+    /// Most recent results first; home score / away score per entry
+    let recentResults: [H2HResult]
+    var totalMatches: Int { homeWins + awayWins }
+}
+
+struct H2HResult {
+    let homeScore: Int
+    let awayScore: Int
 }

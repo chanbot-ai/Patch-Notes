@@ -22,6 +22,7 @@ private struct PSMatch: Decodable {
     let serie: PSSerie?
     let videogame: PSVideogame?
     let tournament: PSTournament?
+    let games: [PSGame]?
 }
 
 private struct PSOpponentSlot: Decodable {
@@ -70,11 +71,74 @@ private struct PSTournament: Decodable {
     let name: String
 }
 
+private struct PSGame: Decodable {
+    let id: Int
+    let position: Int
+    let status: String
+    let length: Int?
+    let winnerTeamId: Int?   // extracted from winner.id during decode
+
+    private enum CodingKeys: String, CodingKey { case id, position, status, length, winner }
+    private enum WinnerKeys: String, CodingKey { case id }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id       = try c.decode(Int.self,    forKey: .id)
+        position = try c.decode(Int.self,    forKey: .position)
+        status   = try c.decode(String.self, forKey: .status)
+        length   = try c.decodeIfPresent(Int.self, forKey: .length)
+        if let wc = try? c.nestedContainer(keyedBy: WinnerKeys.self, forKey: .winner) {
+            winnerTeamId = try? wc.decodeIfPresent(Int.self, forKey: .id) ?? nil
+        } else {
+            winnerTeamId = nil
+        }
+    }
+}
+
 private struct PSPlayer: Decodable {
     let id: Int
     let name: String
     let role: String?
     let imageUrl: String?
+}
+
+private struct PSPlayerDetail: Decodable {
+    let id: Int
+    let name: String
+    let firstName: String?
+    let lastName: String?
+    let nationality: String?
+    let hometown: String?
+    let age: Int?
+    let imageUrl: String?
+    let role: String?
+    let currentTeamName: String?      // decoded from currentTeam.name
+    let currentTeamImageUrl: String?  // decoded from currentTeam.image_url
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, firstName, lastName, nationality, hometown, age, imageUrl, role, currentTeam
+    }
+    private enum TeamKeys: String, CodingKey { case name, imageUrl }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id          = try c.decode(Int.self,    forKey: .id)
+        name        = try c.decode(String.self, forKey: .name)
+        firstName   = try c.decodeIfPresent(String.self, forKey: .firstName)
+        lastName    = try c.decodeIfPresent(String.self, forKey: .lastName)
+        nationality = try c.decodeIfPresent(String.self, forKey: .nationality)
+        hometown    = try c.decodeIfPresent(String.self, forKey: .hometown)
+        age         = try c.decodeIfPresent(Int.self,    forKey: .age)
+        imageUrl    = try c.decodeIfPresent(String.self, forKey: .imageUrl)
+        role        = try c.decodeIfPresent(String.self, forKey: .role)
+        if let tc = try? c.nestedContainer(keyedBy: TeamKeys.self, forKey: .currentTeam) {
+            currentTeamName     = try? tc.decodeIfPresent(String.self, forKey: .name) ?? nil
+            currentTeamImageUrl = try? tc.decodeIfPresent(String.self, forKey: .imageUrl) ?? nil
+        } else {
+            currentTeamName     = nil
+            currentTeamImageUrl = nil
+        }
+    }
 }
 
 // MARK: - Service
@@ -124,6 +188,62 @@ struct PandaScoreService {
             .compactMap(map(_:))
     }
 
+    /// Lightweight fetch of only the currently running matches for live-score polling.
+    func fetchLiveMatches() async throws -> [EsportsMatch] {
+        let raw = try await fetchRaw(endpoint: "matches/running", sort: nil, perPage: 50)
+        return raw
+            .filter { ps in
+                guard let slug = ps.videogame?.slug else { return false }
+                return Self.supportedGames[slug] != nil
+            }
+            .compactMap(map(_:))
+    }
+
+    func fetchHeadToHead(homeID: Int, awayID: Int) async throws -> H2HRecord {
+        var components = URLComponents(
+            url: PandaScoreConfig.baseURL.appendingPathComponent("matches/past"),
+            resolvingAgainstBaseURL: false
+        )!
+        // Comma-separated opponent IDs returns matches where either team played;
+        // we then client-side filter for matches where both appear.
+        components.percentEncodedQuery =
+            "per_page=100&sort=-end_at" +
+            "&filter%5Bopponent_id%5D=\(homeID)%2C\(awayID)" +
+            "&filter%5Bstatus%5D=finished"
+
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(PandaScoreConfig.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        let allMatches = try Self.decoder.decode([PSMatch].self, from: data)
+
+        // Keep only matches where BOTH teams were opponents
+        let h2h = allMatches.filter { m in
+            let ids = Set(m.opponents.compactMap { $0.opponent?.id })
+            return ids.contains(homeID) && ids.contains(awayID)
+        }
+
+        var homeWins = 0
+        var awayWins = 0
+        var recentResults: [H2HResult] = []
+
+        for m in h2h {
+            let homeScore = m.results.first { $0.teamId == homeID }?.score ?? 0
+            let awayScore = m.results.first { $0.teamId == awayID }?.score ?? 0
+            if homeScore > awayScore { homeWins += 1 }
+            else if awayScore > homeScore { awayWins += 1 }
+            if recentResults.count < 5 {
+                recentResults.append(H2HResult(homeScore: homeScore, awayScore: awayScore))
+            }
+        }
+
+        return H2HRecord(homeWins: homeWins, awayWins: awayWins, recentResults: recentResults)
+    }
+
     func fetchTeamPlayers(teamID: Int) async throws -> [RosterPlayer] {
         var components = URLComponents(
             url: PandaScoreConfig.baseURL.appendingPathComponent("players"),
@@ -149,6 +269,32 @@ struct PandaScoreService {
                 imageURL: p.imageUrl.flatMap { URL(string: $0) }
             )
         }
+    }
+
+    func fetchPlayerDetails(playerID: Int) async throws -> PlayerDetails {
+        let url = PandaScoreConfig.baseURL.appendingPathComponent("players/\(playerID)")
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(PandaScoreConfig.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        let raw = try Self.decoder.decode(PSPlayerDetail.self, from: data)
+        return PlayerDetails(
+            id: raw.id,
+            name: raw.name,
+            firstName: raw.firstName,
+            lastName: raw.lastName,
+            nationality: raw.nationality,
+            hometown: raw.hometown,
+            age: raw.age,
+            imageURL: raw.imageUrl.flatMap { URL(string: $0) },
+            role: raw.role,
+            currentTeamName: raw.currentTeamName,
+            currentTeamLogoURL: raw.currentTeamImageUrl.flatMap { URL(string: $0) }
+        )
     }
 
     // MARK: - Private
@@ -222,6 +368,24 @@ struct PandaScoreService {
         let homeLogoURL = home.imageUrl.flatMap { URL(string: $0) }
         let awayLogoURL = away.imageUrl.flatMap { URL(string: $0) }
 
+        let games: [MatchGame] = (ps.games ?? [])
+            .sorted { $0.position < $1.position }
+            .map { g in
+                let gameStatus: GameStatus
+                switch g.status {
+                case "finished":    gameStatus = .finished
+                case "running":     gameStatus = .running
+                default:            gameStatus = .notStarted
+                }
+                return MatchGame(
+                    id: g.id,
+                    position: g.position,
+                    status: gameStatus,
+                    winnerID: g.winnerTeamId,
+                    lengthSeconds: g.length
+                )
+            }
+
         // Build a human-readable event name: prefer serie full_name, then name, then league name
         let serieName = ps.serie?.fullName ?? ps.serie?.name
         let leagueName = ps.league?.name
@@ -251,7 +415,9 @@ struct PandaScoreService {
             awayLogoURL: awayLogoURL,
             homeTeamPandaID: home.id,
             awayTeamPandaID: away.id,
-            eventName: eventName
+            eventName: eventName,
+            games: games,
+            pandaScoreMatchID: ps.id
         )
     }
 

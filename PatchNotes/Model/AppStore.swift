@@ -62,6 +62,8 @@ final class AppStore: ObservableObject {
     @Published private(set) var leagueStandings: [String: [LeagueStanding]]
     @Published private(set) var favoriteTeams: Set<String>
     @Published private(set) var isLoadingEsports: Bool
+    @Published private(set) var esportsLoadFailed: Bool
+    @Published private(set) var isRefreshingLiveScores: Bool
     @Published private(set) var steamProfile: SteamProfile?
     @Published private(set) var steamOwnedGames: [SteamOwnedGame]
     @Published private(set) var steamSyncIsLoading: Bool
@@ -102,6 +104,7 @@ final class AppStore: ObservableObject {
     private let initialFeedPageSize = 25
     private let feedPageSize = 20
     private var hasLoadedFollowingFeedOnce: Bool
+    private var liveScorePollingTask: Task<Void, Never>?
 
     init(
         dataProvider: AppDataProviding = MockAppDataProvider(),
@@ -153,6 +156,8 @@ final class AppStore: ObservableObject {
         let storedFavorites = UserDefaults.standard.stringArray(forKey: "pn.esports.favoriteTeams") ?? []
         self.favoriteTeams = Set(storedFavorites)
         self.isLoadingEsports = false
+        self.esportsLoadFailed = false
+        self.isRefreshingLiveScores = false
         self.steamProfile = nil
         self.steamOwnedGames = []
         self.steamSyncIsLoading = false
@@ -419,9 +424,6 @@ final class AppStore: ObservableObject {
         upcomingReleases = seed.upcomingReleases
         newsFeed = seed.newsFeed
         shortVideos = seed.shortVideos
-        esportsMatches = seed.esportsMatches
-        esportsMarkets = seed.esportsMarkets
-        leagueStandings = seed.leagueStandings
         threadsByGame = seed.threadsByGame
 
         let defaultFavorites = Set(seed.defaultFavoriteIDs)
@@ -922,22 +924,59 @@ final class AppStore: ObservableObject {
         // During pull-to-refresh the native spinner is sufficient; keep existing data visible.
         let isInitialLoad = esportsMatches.isEmpty
         isLoadingEsports = isInitialLoad
-
-        let seed = dataProvider.makeSeedData(referenceDate: Date())
+        esportsLoadFailed = false
 
         if let apiMatches = try? await PandaScoreService().fetchAllMatches(), !apiMatches.isEmpty {
             esportsMatches = apiMatches
         } else if isInitialLoad {
-            // First load with no API data — fall back to seed so the screen isn't blank.
-            esportsMatches = seed.esportsMatches
+            // First load failed with no existing data to show — surface the error state.
+            esportsLoadFailed = true
         }
         // On a pull-to-refresh failure, keep whatever was already displayed.
 
-        esportsMarkets = seed.esportsMarkets
-        leagueStandings = seed.leagueStandings
         isLoadingEsports = false
     }
-    
+
+    /// Fetches only the running matches and updates their scores/games in-place,
+    /// preserving all upcoming and final matches already shown on screen.
+    func refreshLiveScores() async {
+        guard esportsMatches.contains(where: { $0.state == .live }) else { return }
+        isRefreshingLiveScores = true
+        defer { isRefreshingLiveScores = false }
+
+        guard let fresh = try? await PandaScoreService().fetchLiveMatches(),
+              !fresh.isEmpty else { return }
+
+        let freshByID = Dictionary(
+            uniqueKeysWithValues: fresh.compactMap { m -> (Int, EsportsMatch)? in
+                guard let id = m.pandaScoreMatchID else { return nil }
+                return (id, m)
+            }
+        )
+
+        esportsMatches = esportsMatches.map { existing in
+            guard let id = existing.pandaScoreMatchID,
+                  let updated = freshByID[id] else { return existing }
+            return updated
+        }
+    }
+
+    func startLiveScorePolling() {
+        guard liveScorePollingTask == nil else { return }
+        liveScorePollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled, let self else { break }
+                await self.refreshLiveScores()
+            }
+        }
+    }
+
+    func stopLiveScorePolling() {
+        liveScorePollingTask?.cancel()
+        liveScorePollingTask = nil
+    }
+
     func subscribeToCommentMetricsRealtime() {
         guard !hasSubscribedToCommentMetrics else { return }
         hasSubscribedToCommentMetrics = true

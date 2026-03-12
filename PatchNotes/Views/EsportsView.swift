@@ -68,6 +68,25 @@ private enum EsportsStateFilter: String, CaseIterable, Identifiable {
     }
 }
 
+private enum EsportsTab: Hashable {
+    case scores
+    case history
+
+    var label: String {
+        switch self {
+        case .scores:  return "Scores"
+        case .history: return "History"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .scores:  return "sportscourt.fill"
+        case .history: return "clock.arrow.circlepath"
+        }
+    }
+}
+
 struct EsportsView: View {
     @EnvironmentObject private var store: AppStore
     @State private var selectedFilter: EsportsLeagueFilter = .top
@@ -79,6 +98,10 @@ struct EsportsView: View {
     @State private var standingsLeague = ""
     @State private var hasInitiallyLoaded = false
     @State private var selectedStateFilter: EsportsStateFilter = .all
+    @State private var searchText = ""
+    @State private var isSearching = false
+    @FocusState private var searchFocused: Bool
+    @State private var selectedTab: EsportsTab = .scores
 
     private var availableFilters: [EsportsLeagueFilter] {
         let leagues = Array(Set(store.esportsMatches.map(\.league))).sorted()
@@ -127,6 +150,13 @@ struct EsportsView: View {
         if let team = selectedTeam {
             base = base.filter { $0.homeTeam == team || $0.awayTeam == team }
         }
+        let trimmed = searchText.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            let q = trimmed.lowercased()
+            base = base.filter {
+                $0.homeTeam.lowercased().contains(q) || $0.awayTeam.lowercased().contains(q)
+            }
+        }
         return base.sorted { lhs, rhs in
             let lhsRank = statePriority(lhs.state)
             let rhsRank = statePriority(rhs.state)
@@ -148,6 +178,37 @@ struct EsportsView: View {
         }
     }
 
+    private var historyMatches: [EsportsMatch] {
+        leagueFilteredMatches
+            .filter { $0.state == .final }
+            .sorted { lhs, rhs in
+                (lhs.scheduledAt ?? .distantPast) > (rhs.scheduledAt ?? .distantPast)
+            }
+    }
+
+    private var groupedHistory: [(label: String, matches: [EsportsMatch])] {
+        let calendar = Calendar.current
+        let df = DateFormatter()
+        df.dateFormat = "EEE, MMM d"
+
+        let grouped = Dictionary(grouping: historyMatches) { match -> Date in
+            guard let date = match.scheduledAt else { return .distantPast }
+            return calendar.startOfDay(for: date)
+        }
+
+        return grouped.keys
+            .sorted(by: >)
+            .map { dayStart in
+                let matches = grouped[dayStart] ?? []
+                let label: String
+                if dayStart == .distantPast              { label = "Earlier" }
+                else if calendar.isDateInToday(dayStart)     { label = "Today" }
+                else if calendar.isDateInYesterday(dayStart) { label = "Yesterday" }
+                else                                         { label = df.string(from: dayStart) }
+                return (label: label, matches: matches)
+            }
+    }
+
     private var tickerMatches: [EsportsMatch] {
         filteredMatches.filter { $0.state == .live || $0.state == .upcoming }
     }
@@ -155,19 +216,21 @@ struct EsportsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                SectionHeader(title: "Scores", subtitle: "Live game and score updates.")
+                SectionHeader(title: "Esports", subtitle: "Scores, results, and match history.")
                 filterBar
-                stateFilterBar
-                teamFilterBar
-                // Feature 9: skeleton / Feature 8: empty state / content
+                // loading → error → empty → content
                 if store.isLoadingEsports {
-                    skeletonBoard
+                    loadingIndicator
+                } else if store.esportsLoadFailed {
+                    errorState
                 } else if store.esportsMatches.isEmpty {
                     emptyState
                 } else {
                     scoresBoard
+                    if selectedTab == .scores && !store.esportsMarkets.isEmpty {
+                        marketPulse
+                    }
                 }
-                marketPulse
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
@@ -178,6 +241,8 @@ struct EsportsView: View {
             hasInitiallyLoaded = true
             await store.refreshEsports()
         }
+        .onAppear { store.startLiveScorePolling() }
+        .onDisappear { store.stopLiveScorePolling() }
         .navigationTitle("Esports")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: selectedFilter) { _, _ in
@@ -185,6 +250,12 @@ struct EsportsView: View {
         }
         .onChange(of: selectedStateFilter) { _, _ in
             withAnimation(.spring(duration: 0.25)) { selectedTeam = nil }
+        }
+        .onChange(of: selectedTab) { _, _ in
+            withAnimation(.spring(duration: 0.25)) {
+                isSearching = false
+                searchText = ""
+            }
         }
         .sheet(isPresented: $showUpcomingSheet) {
             UpcomingMatchesSheet(league: upcomingSheetLeague, matches: store.esportsMatches)
@@ -390,6 +461,105 @@ struct EsportsView: View {
         }
     }
 
+    // MARK: - Tab Bar
+
+    private var tabBar: some View {
+        HStack(spacing: 8) {
+            ForEach([EsportsTab.scores, EsportsTab.history], id: \.self) { tab in
+                Button {
+                    withAnimation(.spring(duration: 0.25)) { selectedTab = tab }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: tab.systemImage)
+                            .font(.caption2.weight(.bold))
+                        Text(tab.label)
+                            .font(.caption.weight(.bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        selectedTab == tab
+                            ? AppTheme.accent.opacity(0.34)
+                            : Color.white.opacity(0.08),
+                        in: Capsule()
+                    )
+                    .overlay {
+                        Capsule()
+                            .stroke(
+                                selectedTab == tab
+                                    ? AppTheme.accent.opacity(0.72)
+                                    : Color.white.opacity(0.10),
+                                lineWidth: 1
+                            )
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(tab.label) tab")
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: - History Content
+
+    private var historyContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if groupedHistory.isEmpty {
+                VStack(spacing: 14) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.white.opacity(0.25))
+                    Text("No Recent Results")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.55))
+                    Text("Completed match results will appear here.")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.35))
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(32)
+                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                }
+            } else {
+                ForEach(groupedHistory, id: \.label) { group in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(group.label)
+                            .font(.subheadline.weight(.black))
+                            .foregroundStyle(.white.opacity(0.55))
+                            .padding(.leading, 4)
+
+                        VStack(spacing: 0) {
+                            ForEach(Array(group.matches.enumerated()), id: \.element.id) { index, match in
+                                Button {
+                                    selectedMatch = match
+                                } label: {
+                                    HistoryMatchRow(match: match)
+                                }
+                                .buttonStyle(PressableButtonStyle())
+
+                                if index < group.matches.count - 1 {
+                                    Divider()
+                                        .background(Color.white.opacity(0.08))
+                                        .padding(.horizontal, 12)
+                                }
+                            }
+                        }
+                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Feature 9: Skeleton
 
     private var skeletonBoard: some View {
@@ -429,6 +599,22 @@ struct EsportsView: View {
         .shadow(color: AppTheme.accent.opacity(0.35), radius: 14, y: 5)
     }
 
+    // MARK: - Loading Indicator
+
+    private var loadingIndicator: some View {
+        VStack(spacing: 14) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+                .scaleEffect(1.2)
+            Text("Loading matches…")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white.opacity(0.45))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 60)
+    }
+
     // MARK: - Feature 8: Empty State
 
     private var emptyState: some View {
@@ -439,7 +625,7 @@ struct EsportsView: View {
             Text("No Matches Right Now")
                 .font(.headline.weight(.bold))
                 .foregroundStyle(.white.opacity(0.55))
-            Text("Pull down to refresh or check back later.")
+            Text("There are no scheduled or live matches at the moment. Check back soon.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.35))
                 .multilineTextAlignment(.center)
@@ -453,31 +639,134 @@ struct EsportsView: View {
         }
     }
 
+    private var errorState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 40))
+                .foregroundStyle(.orange.opacity(0.70))
+            Text("Couldn't Load Matches")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.white.opacity(0.75))
+            Text("There was a problem connecting to the scores service. Pull down to try again.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.40))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(32)
+        .background(Color.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.orange.opacity(0.20), lineWidth: 1)
+        }
+    }
+
     // MARK: - Scores Board
 
     private var scoresBoard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Scores", systemImage: "sportscourt.fill")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(.white)
-                Spacer()
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.white.opacity(0.72))
-                Image(systemName: "ellipsis")
-                    .foregroundStyle(.white.opacity(0.72))
-            }
+            HStack(spacing: 8) {
+                if isSearching {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.45))
+                        TextField("Search teams…", text: $searchText)
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .tint(AppTheme.accent)
+                            .focused($searchFocused)
+                            .submitLabel(.search)
+                            .autocorrectionDisabled()
+                        if !searchText.isEmpty {
+                            Button { searchText = "" } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.white.opacity(0.40))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
+                    Button("Cancel") {
+                        withAnimation(.spring(duration: 0.28)) {
+                            isSearching = false
+                            searchText = ""
+                            searchFocused = false
+                        }
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(AppTheme.accent)
+                    .buttonStyle(.plain)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                } else {
+                    HStack(spacing: 6) {
+                        ForEach([EsportsTab.scores, EsportsTab.history], id: \.self) { tab in
+                            Button {
+                                withAnimation(.spring(duration: 0.25)) { selectedTab = tab }
+                            } label: {
+                                Text(tab.label)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        selectedTab == tab
+                                            ? AppTheme.accent.opacity(0.34)
+                                            : Color.white.opacity(0.08),
+                                        in: Capsule()
+                                    )
+                                    .overlay {
+                                        Capsule()
+                                            .stroke(
+                                                selectedTab == tab
+                                                    ? AppTheme.accent.opacity(0.72)
+                                                    : Color.white.opacity(0.10),
+                                                lineWidth: 1
+                                            )
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    Spacer()
+                    Button {
+                        withAnimation(.spring(duration: 0.28)) {
+                            isSearching = true
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            searchFocused = true
+                        }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
+                    .buttonStyle(.plain)
+                    Image(systemName: "ellipsis")
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+            }
+            .animation(.spring(duration: 0.28), value: isSearching)
+
+            if selectedTab == .scores {
+            stateFilterBar
+            teamFilterBar
             LiveTickerView(matches: tickerMatches)
 
-            if filteredMatches.isEmpty, let team = selectedTeam {
+            if filteredMatches.isEmpty {
+                let trimmed = searchText.trimmingCharacters(in: .whitespaces)
                 VStack(spacing: 10) {
-                    Image(systemName: "sportscourt")
+                    Image(systemName: trimmed.isEmpty ? "sportscourt" : "magnifyingglass")
                         .font(.system(size: 28))
                         .foregroundStyle(.white.opacity(0.35))
-                    Text("No matches for \(team)")
+                    Text(trimmed.isEmpty
+                         ? "No matches for \(selectedTeam ?? "this filter")"
+                         : "No results for \"\(trimmed)\"")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.50))
+                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 20)
@@ -558,6 +847,9 @@ struct EsportsView: View {
                         .padding(.vertical, 4)
                     }
                 }
+            }
+            } else {
+                historyContent
             }
         }
         .padding(14)
@@ -850,6 +1142,13 @@ private struct TeamScoreRow: View {
 private struct CompactMatchCard: View {
     let match: EsportsMatch
 
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+
     private var awayWon: Bool? {
         guard match.state == .final else { return nil }
         return match.awayScore > match.homeScore
@@ -867,6 +1166,11 @@ private struct CompactMatchCard: View {
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(stateColor)
                 Spacer()
+                if match.state == .upcoming, let date = match.scheduledAt {
+                    Text(Self.timeFormatter.string(from: date))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.accentBlue.opacity(0.90))
+                }
             }
             CompactTeamRow(team: match.awayTeam, score: match.awayScore, isWinner: awayWon, logoURL: match.awayLogoURL)
             CompactTeamRow(team: match.homeTeam, score: match.homeScore, isWinner: homeWon, logoURL: match.homeLogoURL)
@@ -1183,6 +1487,62 @@ private struct UpcomingMatchRow: View {
                 DispatchQueue.main.async { reminderSet = true }
             }
         }
+    }
+}
+
+// MARK: - History Match Row
+
+private struct HistoryMatchRow: View {
+    let match: EsportsMatch
+
+    private var awayWon: Bool { match.awayScore > match.homeScore }
+    private var homeWon: Bool { match.homeScore > match.awayScore }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            // Game badge
+            Text(match.league)
+                .font(.caption2.weight(.black))
+                .foregroundStyle(.white.opacity(0.45))
+                .frame(width: 38, alignment: .leading)
+
+            // Away team (right-aligned)
+            HStack(spacing: 5) {
+                Text(match.awayTeam)
+                    .font(.caption.weight(awayWon ? .bold : .regular))
+                    .foregroundStyle(awayWon ? .white : .white.opacity(0.45))
+                    .lineLimit(1)
+                    .multilineTextAlignment(.trailing)
+                TeamLogoBadge(team: match.awayTeam, size: 22, overrideURL: match.awayLogoURL)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+
+            // Score
+            HStack(spacing: 4) {
+                Text("\(match.awayScore)")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(awayWon ? .green : .white.opacity(0.45))
+                Text("–")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.28))
+                Text("\(match.homeScore)")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(homeWon ? .green : .white.opacity(0.45))
+            }
+            .frame(width: 56, alignment: .center)
+
+            // Home team (left-aligned)
+            HStack(spacing: 5) {
+                TeamLogoBadge(team: match.homeTeam, size: 22, overrideURL: match.homeLogoURL)
+                Text(match.homeTeam)
+                    .font(.caption.weight(homeWon ? .bold : .regular))
+                    .foregroundStyle(homeWon ? .white : .white.opacity(0.45))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 }
 
