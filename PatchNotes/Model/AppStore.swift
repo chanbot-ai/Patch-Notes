@@ -62,6 +62,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var esportsMarkets: [EsportsMarket]
     @Published private(set) var leagueStandings: [String: [LeagueStanding]]
     @Published private(set) var favoriteTeams: Set<String>
+    @Published var scheduledReminderIDs: Set<String> = []
     @Published private(set) var isLoadingEsports: Bool
     @Published private(set) var esportsLoadFailed: Bool
     @Published private(set) var isRefreshingLiveScores: Bool
@@ -236,6 +237,18 @@ final class AppStore: ObservableObject {
 
     func isFavoriteTeam(_ team: String) -> Bool {
         favoriteTeams.contains(team)
+    }
+
+    func isReminderScheduled(for identifier: String) -> Bool {
+        scheduledReminderIDs.contains(identifier)
+    }
+
+    func markReminderScheduled(_ identifier: String) {
+        scheduledReminderIDs.insert(identifier)
+    }
+
+    func markReminderCancelled(_ identifier: String) {
+        scheduledReminderIDs.remove(identifier)
     }
     
     func isFollowingGame(_ game: Game) -> Bool {

@@ -427,16 +427,22 @@ private struct OutcomeRow: View {
 private struct MatchRemindMeButton: View {
     let match: EsportsMatch
 
-    @State private var reminderSet = false
+    @EnvironmentObject private var store: AppStore
     @State private var showPermissionAlert = false
+
+    private var reminderSet: Bool { store.isReminderScheduled(for: match.notificationIdentifier) }
 
     var body: some View {
         Button {
-            scheduleReminder()
+            if reminderSet {
+                cancelReminder()
+            } else {
+                scheduleReminder()
+            }
         } label: {
             Label(
-                reminderSet ? "Reminder Set" : "Remind Me · 5 min before",
-                systemImage: reminderSet ? "bell.fill" : "bell"
+                reminderSet ? "Cancel Reminder" : "Remind Me · 5 min before",
+                systemImage: reminderSet ? "bell.slash.fill" : "bell"
             )
             .font(.subheadline.weight(.bold))
             .foregroundStyle(reminderSet ? .yellow : .white)
@@ -451,11 +457,16 @@ private struct MatchRemindMeButton: View {
                     .stroke(reminderSet ? Color.yellow.opacity(0.40) : Color.white.opacity(0.20), lineWidth: 1)
             }
         }
-        .disabled(reminderSet)
         .onAppear {
             UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
                 let isScheduled = requests.contains { $0.identifier == match.notificationIdentifier }
-                if isScheduled { DispatchQueue.main.async { reminderSet = true } }
+                DispatchQueue.main.async {
+                    if isScheduled {
+                        store.markReminderScheduled(match.notificationIdentifier)
+                    } else {
+                        store.markReminderCancelled(match.notificationIdentifier)
+                    }
+                }
             }
         }
         .alert("Notifications Disabled", isPresented: $showPermissionAlert) {
@@ -468,6 +479,13 @@ private struct MatchRemindMeButton: View {
         } message: {
             Text("Enable notifications in Settings to receive match reminders.")
         }
+    }
+
+    private func cancelReminder() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [match.notificationIdentifier]
+        )
+        store.markReminderCancelled(match.notificationIdentifier)
     }
 
     private func scheduleReminder() {
@@ -509,7 +527,7 @@ private struct MatchRemindMeButton: View {
         )
         UNUserNotificationCenter.current().add(request) { error in
             if error == nil {
-                DispatchQueue.main.async { reminderSet = true }
+                DispatchQueue.main.async { store.markReminderScheduled(match.notificationIdentifier) }
             }
         }
     }

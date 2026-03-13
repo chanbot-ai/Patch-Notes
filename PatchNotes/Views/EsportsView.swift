@@ -1302,6 +1302,7 @@ private struct CompactMatchCard: View {
                     Text(Self.timeFormatter.string(from: date))
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(AppTheme.accentBlue.opacity(0.90))
+                    CompactReminderBell(match: match)
                 }
             }
             CompactTeamRow(team: match.awayTeam, score: match.awayScore, isWinner: awayWon, logoURL: match.awayLogoURL)
@@ -1325,6 +1326,110 @@ private struct CompactMatchCard: View {
         case .live:     return .red
         case .upcoming: return AppTheme.accentBlue
         case .final:    return .white.opacity(0.72)
+        }
+    }
+}
+
+// MARK: - Compact Reminder Bell
+
+private struct CompactReminderBell: View {
+    let match: EsportsMatch
+
+    @EnvironmentObject private var store: AppStore
+    @State private var showPermissionAlert = false
+
+    private var reminderSet: Bool { store.isReminderScheduled(for: match.notificationIdentifier) }
+
+    var body: some View {
+        Button {
+            if reminderSet {
+                cancelReminder()
+            } else {
+                scheduleReminder()
+            }
+        } label: {
+            Image(systemName: reminderSet ? "bell.fill" : "bell")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(reminderSet ? .yellow : .white.opacity(0.45))
+                .padding(4)
+                .background(
+                    reminderSet ? Color.yellow.opacity(0.15) : Color.clear,
+                    in: Circle()
+                )
+        }
+        .buttonStyle(.plain)
+        .onAppear {
+            UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
+                let isScheduled = requests.contains { $0.identifier == match.notificationIdentifier }
+                DispatchQueue.main.async {
+                    if isScheduled {
+                        store.markReminderScheduled(match.notificationIdentifier)
+                    } else {
+                        store.markReminderCancelled(match.notificationIdentifier)
+                    }
+                }
+            }
+        }
+        .alert("Notifications Disabled", isPresented: $showPermissionAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enable notifications in Settings to receive match reminders.")
+        }
+    }
+
+    private func cancelReminder() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [match.notificationIdentifier]
+        )
+        store.markReminderCancelled(match.notificationIdentifier)
+    }
+
+    private func scheduleReminder() {
+        guard let scheduledAt = match.scheduledAt else { return }
+        let fireDate = scheduledAt.addingTimeInterval(-5 * 60)
+        guard fireDate > Date() else { return }
+
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                switch settings.authorizationStatus {
+                case .denied:
+                    showPermissionAlert = true
+                case .notDetermined:
+                    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                        if granted { addNotification(fireDate: fireDate) }
+                    }
+                default:
+                    addNotification(fireDate: fireDate)
+                }
+            }
+        }
+    }
+
+    private func addNotification(fireDate: Date) {
+        let content = UNMutableNotificationContent()
+        content.title = "\(match.awayTeam) vs \(match.homeTeam)"
+        content.body = "Match starts in 5 minutes · \(match.league)"
+        content.sound = .default
+
+        let components = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second],
+            from: fireDate
+        )
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        let request = UNNotificationRequest(
+            identifier: match.notificationIdentifier,
+            content: content,
+            trigger: trigger
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if error == nil {
+                DispatchQueue.main.async { store.markReminderScheduled(match.notificationIdentifier) }
+            }
         }
     }
 }
