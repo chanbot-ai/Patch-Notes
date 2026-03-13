@@ -10,28 +10,6 @@ interface Env {
   AI: Ai;
 }
 
-interface RedditPost {
-  id: string;
-  title: string;
-  selftext: string;
-  url: string;
-  permalink: string;
-  author: string;
-  score: number;
-  num_comments: number;
-  created_utc: number;
-  thumbnail: string;
-  preview?: {
-    images?: Array<{
-      source?: { url: string; width: number; height: number };
-    }>;
-  };
-  is_self: boolean;
-  link_flair_text?: string;
-  subreddit: string;
-  domain: string;
-}
-
 interface TwitterPost {
   id: string;
   text: string;
@@ -145,9 +123,14 @@ async function rewriteContent(
   title: string,
   body: string | null,
   sourceProvider: string,
-): Promise<{ title: string; body: string | null; skip: boolean }> {
+  gameTitles: string[],
+): Promise<{ title: string; body: string | null; skip: boolean; game: string | null }> {
   try {
-    const prompt = `You are a gaming news editor for a social app called PatchNotes. Your job is to decide if a post is relevant to gamers, and if so, rewrite it.
+    const gameListStr = gameTitles.length > 0
+      ? `\n\nKNOWN GAMES (pick the closest match if the post is about one of these, or null if none match or if the post is about gaming in general):\n${gameTitles.join(", ")}`
+      : "";
+
+    const prompt = `You are a gaming news editor for a social app called PatchNotes. Your job is to decide if a post is relevant to gamers, rewrite it, and identify which game it's about.
 
 RULES:
 1. REJECT posts about hardware deals, tech accessories, monitors, peripherals, non-gaming merchandise, or anything not directly about video games, game studios, esports, or the gaming industry. Set "skip": true for these.
@@ -156,15 +139,16 @@ RULES:
 4. If a specific source, journalist, or insider is mentioned, credit them inline (e.g., "According to IGN..." or "Insider Tom Henderson reports...").
 5. Do not add hashtags, emojis, links, or URLs. Do not start with "RT" or reference tweets.
 6. Preserve all factual claims and key details. Do not editorialize or add opinions.
+7. Set "game" to the exact game title from the KNOWN GAMES list if the post is primarily about that game. Set null if no match or if it's general gaming news.${gameListStr}
 
 SOURCE POST:
 TITLE: ${title}
 ${body ? `BODY: ${body.slice(0, 500)}` : ""}
 
 Respond in this exact JSON format only, no other text:
-{"skip": false, "title": "rewritten title here", "body": "rewritten body here or null if no body needed"}
+{"skip": false, "title": "rewritten title here", "body": "rewritten body here or null if no body needed", "game": "exact game title or null"}
 Or if the post should be rejected:
-{"skip": true, "title": "", "body": null}`;
+{"skip": true, "title": "", "body": null, "game": null}`;
 
     const result = await ai.run("@cf/meta/llama-3.1-8b-instruct", {
       messages: [{ role: "user", content: prompt }],
@@ -180,66 +164,122 @@ Or if the post should be rejected:
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       if (parsed.skip === true) {
-        return { title: "", body: null, skip: true };
+        return { title: "", body: null, skip: true, game: null };
       }
       return {
         title: (parsed.title as string)?.slice(0, 300) || title,
         body: parsed.body || null,
         skip: false,
+        game: parsed.game || null,
       };
     }
   } catch (err) {
     console.log(`AI rewrite failed, using original: ${(err as Error).message}`);
   }
   // Fallback: return original content
-  return { title, body, skip: false };
+  return { title, body, skip: false, game: null };
 }
 
 // -- Reddit helpers --
+// Reddit blocks JSON API from datacenter IPs but serves RSS/Atom feeds.
+// We parse the Atom feed which gives us: title, link, author, content snippet, updated time.
+// No score/upvote data available via RSS, so we can't filter by MIN_SCORE.
+
+interface RssRedditPost {
+  id: string;
+  title: string;
+  body: string | null;
+  permalink: string;
+  author: string;
+  mediaUrl: string | null;
+  thumbnailUrl: string | null;
+  updatedAt: string;
+  subreddit: string;
+}
+
+function parseAtomFeed(xml: string, subreddit: string): RssRedditPost[] {
+  const posts: RssRedditPost[] = [];
+  // Match each <entry>...</entry>
+  const entries = xml.match(/<entry>[\s\S]*?<\/entry>/g) ?? [];
+  for (const entry of entries) {
+    const tag = (name: string): string => {
+      const m = entry.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`));
+      return m ? m[1].trim() : "";
+    };
+    const attr = (name: string, a: string): string => {
+      const m = entry.match(new RegExp(`<${name}[^>]*${a}="([^"]*)"`));
+      return m ? m[1] : "";
+    };
+
+    const link = attr("link", "href");
+    // Extract Reddit post ID from link: /r/gaming/comments/ABC123/...
+    const idMatch = link.match(/\/comments\/([a-z0-9]+)/i);
+    if (!idMatch) continue;
+
+    const title = tag("title").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+
+    // Content is HTML-encoded; extract text and look for media
+    const content = tag("content");
+    const decoded = content
+      .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+      .replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+
+    // Extract thumbnail/image from the HTML content
+    // Fully decode any remaining entities in URLs (RSS feeds can double-encode)
+    const decodeEntities = (s: string): string =>
+      s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+
+    let mediaUrl: string | null = null;
+    let thumbnailUrl: string | null = null;
+    const imgMatch = decoded.match(/<img\s+src="([^"]+)"/);
+    if (imgMatch) {
+      const imgUrl = decodeEntities(imgMatch[1]);
+      if (imgUrl.includes("preview.redd.it") || imgUrl.includes("i.redd.it") || imgUrl.includes("external-preview.redd.it")) {
+        mediaUrl = imgUrl;
+      } else if (imgUrl.includes("thumbs.redditmedia")) {
+        thumbnailUrl = imgUrl;
+      }
+    }
+
+    // Extract text body (strip HTML tags)
+    const textContent = decoded
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 500) || null;
+
+    posts.push({
+      id: idMatch[1],
+      title,
+      body: textContent && textContent.length > 30 ? textContent : null,
+      permalink: link,
+      author: tag("author") ? (tag("name") || "unknown") : "unknown",
+      mediaUrl,
+      thumbnailUrl,
+      updatedAt: tag("updated"),
+      subreddit,
+    });
+  }
+  return posts;
+}
 
 async function fetchSubredditHot(
   subreddit: string,
-): Promise<RedditPost[]> {
-  const url = `https://www.reddit.com/r/${subreddit}/hot.json?limit=${POSTS_PER_SUBREDDIT * 2}&raw_json=1`;
+): Promise<RssRedditPost[]> {
+  const url = `https://www.reddit.com/r/${subreddit}/hot.rss?limit=${POSTS_PER_SUBREDDIT * 2}`;
   const resp = await fetch(url, {
     headers: { "User-Agent": REDDIT_USER_AGENT },
   });
 
   if (!resp.ok) {
     console.log(
-      `Reddit API error for r/${subreddit}: ${resp.status} ${resp.statusText}`,
+      `Reddit RSS error for r/${subreddit}: ${resp.status} ${resp.statusText}`,
     );
     return [];
   }
 
-  const data = (await resp.json()) as {
-    data?: { children?: Array<{ data: RedditPost }> };
-  };
-  return (data?.data?.children ?? [])
-    .map((child) => child.data)
-    .filter(
-      (post) => !post.is_self || (post.selftext && post.selftext.length > 20),
-    )
-    .filter((post) => post.score >= MIN_SCORE)
-    .slice(0, POSTS_PER_SUBREDDIT);
-}
-
-function extractRedditMediaUrl(post: RedditPost): string | null {
-  if (post.preview?.images?.[0]?.source?.url) {
-    return post.preview.images[0].source.url;
-  }
-  if (
-    post.thumbnail &&
-    post.thumbnail.startsWith("http") &&
-    !post.thumbnail.includes("self") &&
-    !post.thumbnail.includes("default")
-  ) {
-    return post.thumbnail;
-  }
-  if (/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(post.url)) {
-    return post.url;
-  }
-  return null;
+  const xml = await resp.text();
+  return parseAtomFeed(xml, subreddit).slice(0, POSTS_PER_SUBREDDIT);
 }
 
 // -- Twitter helpers --
@@ -318,31 +358,27 @@ function extractTwitterMedia(
 // -- Post builders --
 
 function buildRedditPost(
-  post: RedditPost,
+  post: RssRedditPost,
   rewritten: { title: string; body: string | null },
   botUserId: string,
   gameId: string | null,
 ): Record<string, unknown> {
-  const mediaUrl = extractRedditMediaUrl(post);
-
   return {
     author_id: botUserId,
     game_id: gameId,
-    type: mediaUrl ? "image" : "news",
+    type: post.mediaUrl ? "image" : "news",
     title: rewritten.title,
     body: rewritten.body,
-    media_url: mediaUrl,
-    thumbnail_url: post.thumbnail?.startsWith("http") ? post.thumbnail : null,
+    media_url: post.mediaUrl,
+    thumbnail_url: post.thumbnailUrl,
     is_system_generated: true,
     source_kind: "curated",
     source_provider: "reddit",
     source_external_id: `reddit_${post.id}`,
     source_handle: null,
     source_url: null,
-    source_published_at: new Date(post.created_utc * 1000).toISOString(),
+    source_published_at: post.updatedAt || new Date().toISOString(),
     source_metadata: {
-      reddit_score: post.score,
-      reddit_comments: post.num_comments,
       original_subreddit: post.subreddit,
     },
   };
@@ -397,6 +433,8 @@ async function processSource(
   env: Env,
   source: BotSource,
   result: PipelineResult,
+  gameTitles: string[],
+  gameMap: Map<string, string>,
 ): Promise<void> {
   const isTwitter = source.source_type === "twitter";
   const isReddit = source.source_type === "reddit";
@@ -428,15 +466,15 @@ async function processSource(
     result.postsFetched += posts.length;
     if (posts.length > 0) {
       console.log(
-        `r/${source.source_identifier}: ${posts.length} qualifying posts`,
+        `r/${source.source_identifier}: ${posts.length} posts via RSS`,
       );
     }
     items = posts.map((post) => ({
       externalId: `reddit_${post.id}`,
       originalTitle: post.title,
-      originalBody: post.is_self ? post.selftext.slice(0, 2000) : null,
+      originalBody: post.body,
       provider: "reddit",
-      buildPost: (rewritten) =>
+      buildPost: (rewritten: { title: string; body: string | null }) =>
         buildRedditPost(post, rewritten, source.bot_user_id, source.game_id),
     }));
   }
@@ -474,12 +512,13 @@ async function processSource(
       continue;
     }
 
-    // Rewrite with AI (may skip non-gaming content)
+    // Rewrite with AI (may skip non-gaming content, may tag a game)
     const rewritten = await rewriteContent(
       env.AI,
       item.originalTitle,
       item.originalBody,
       item.provider,
+      gameTitles,
     );
 
     if (rewritten.skip) {
@@ -489,6 +528,16 @@ async function processSource(
     }
 
     const appPost = item.buildPost(rewritten);
+
+    // AI game-tagging: if AI identified a game, use it (even overriding source game_id
+    // to handle cross-posted content, e.g. a Mass Effect post in r/reddeadredemption)
+    if (rewritten.game) {
+      const matchedGameId = gameMap.get(rewritten.game.toLowerCase());
+      if (matchedGameId && matchedGameId !== source.game_id) {
+        appPost.game_id = matchedGameId;
+        console.log(`AI tagged "${rewritten.title.slice(0, 50)}" → ${rewritten.game}`);
+      }
+    }
 
     try {
       const inserted = await sbInsert(env, "posts", appPost);
@@ -527,6 +576,16 @@ async function processSource(
 }
 
 async function fetchContent(env: Env): Promise<PipelineResult> {
+  // Load game catalog for AI game-tagging (1 subrequest, cached for the batch)
+  const gamesRaw = (await sbGet(
+    env,
+    "games",
+    "select=id,title&order=title.asc",
+  )) as Array<{ id: string; title: string }>;
+  const gameMap = new Map(gamesRaw.map((g) => [g.title.toLowerCase(), g.id]));
+  const gameTitles = gamesRaw.map((g) => g.title);
+  console.log(`Loaded ${gameTitles.length} games for AI tagging`);
+
   // Fetch oldest-refreshed sources first (both reddit and twitter),
   // limited to BATCH_SIZE to stay within Cloudflare's 50 subrequest limit.
   const sources = (await sbGet(
@@ -549,7 +608,7 @@ async function fetchContent(env: Env): Promise<PipelineResult> {
 
   for (const source of sources) {
     try {
-      await processSource(env, source, result);
+      await processSource(env, source, result, gameTitles, gameMap);
     } catch (err) {
       const msg = `${source.source_type}/${source.source_identifier}: ${(err as Error).message}`;
       console.log(msg);
