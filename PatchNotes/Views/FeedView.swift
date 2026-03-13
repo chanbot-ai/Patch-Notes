@@ -355,48 +355,47 @@ struct FeedView: View {
 
     private var gameChannelBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 ForEach(store.followedGamesForPillBar) { game in
                     let isSelected = feedFilter == .game(game.id)
-                    Button {
+                    VStack(spacing: 6) {
+                        RemoteMediaImage(
+                            primaryURL: game.coverImageURL,
+                            fallbackURL: MediaFallback.gameCover
+                        )
+                        .frame(width: 82, height: 82)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(
+                                    isSelected
+                                        ? AppTheme.accent.opacity(0.8)
+                                        : Color.white.opacity(0.15),
+                                    lineWidth: isSelected ? 2.5 : 1
+                                )
+                        }
+                        .shadow(
+                            color: isSelected ? AppTheme.accent.opacity(0.35) : .clear,
+                            radius: 6, y: 2
+                        )
+
+                        Text(game.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(isSelected ? .white : .white.opacity(0.65))
+                            .lineLimit(1)
+                            .frame(width: 88)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
                         if isSelected {
                             feedFilter = .forYou
                         } else {
                             feedFilter = .game(game.id)
                         }
-                    } label: {
-                        VStack(spacing: 6) {
-                            RemoteMediaImage(
-                                primaryURL: game.coverImageURL,
-                                fallbackURL: MediaFallback.gameCover
-                            )
-                            .frame(width: 82, height: 82)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .stroke(
-                                        isSelected
-                                            ? AppTheme.accent.opacity(0.8)
-                                            : Color.white.opacity(0.15),
-                                        lineWidth: isSelected ? 2.5 : 1
-                                    )
-                            }
-                            .shadow(
-                                color: isSelected ? AppTheme.accent.opacity(0.35) : .clear,
-                                radius: 6, y: 2
-                            )
-
-                            Text(game.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(isSelected ? .white : .white.opacity(0.65))
-                                .lineLimit(1)
-                                .frame(width: 88)
-
-                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal, 4)
             .padding(.vertical, 2)
         }
     }

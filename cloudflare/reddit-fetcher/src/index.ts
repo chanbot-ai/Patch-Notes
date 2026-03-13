@@ -10,28 +10,6 @@ interface Env {
   AI: Ai;
 }
 
-interface RedditPost {
-  id: string;
-  title: string;
-  selftext: string;
-  url: string;
-  permalink: string;
-  author: string;
-  score: number;
-  num_comments: number;
-  created_utc: number;
-  thumbnail: string;
-  preview?: {
-    images?: Array<{
-      source?: { url: string; width: number; height: number };
-    }>;
-  };
-  is_self: boolean;
-  link_flair_text?: string;
-  subreddit: string;
-  domain: string;
-}
-
 interface TwitterPost {
   id: string;
   text: string;
@@ -203,50 +181,105 @@ Or if the post should be rejected:
 }
 
 // -- Reddit helpers --
+// Reddit blocks JSON API from datacenter IPs but serves RSS/Atom feeds.
+// We parse the Atom feed which gives us: title, link, author, content snippet, updated time.
+// No score/upvote data available via RSS, so we can't filter by MIN_SCORE.
+
+interface RssRedditPost {
+  id: string;
+  title: string;
+  body: string | null;
+  permalink: string;
+  author: string;
+  mediaUrl: string | null;
+  thumbnailUrl: string | null;
+  updatedAt: string;
+  subreddit: string;
+}
+
+function parseAtomFeed(xml: string, subreddit: string): RssRedditPost[] {
+  const posts: RssRedditPost[] = [];
+  // Match each <entry>...</entry>
+  const entries = xml.match(/<entry>[\s\S]*?<\/entry>/g) ?? [];
+  for (const entry of entries) {
+    const tag = (name: string): string => {
+      const m = entry.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`));
+      return m ? m[1].trim() : "";
+    };
+    const attr = (name: string, a: string): string => {
+      const m = entry.match(new RegExp(`<${name}[^>]*${a}="([^"]*)"`));
+      return m ? m[1] : "";
+    };
+
+    const link = attr("link", "href");
+    // Extract Reddit post ID from link: /r/gaming/comments/ABC123/...
+    const idMatch = link.match(/\/comments\/([a-z0-9]+)/i);
+    if (!idMatch) continue;
+
+    const title = tag("title").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+
+    // Content is HTML-encoded; extract text and look for media
+    const content = tag("content");
+    const decoded = content
+      .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+      .replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+
+    // Extract thumbnail/image from the HTML content
+    // Fully decode any remaining entities in URLs (RSS feeds can double-encode)
+    const decodeEntities = (s: string): string =>
+      s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+
+    let mediaUrl: string | null = null;
+    let thumbnailUrl: string | null = null;
+    const imgMatch = decoded.match(/<img\s+src="([^"]+)"/);
+    if (imgMatch) {
+      const imgUrl = decodeEntities(imgMatch[1]);
+      if (imgUrl.includes("preview.redd.it") || imgUrl.includes("i.redd.it") || imgUrl.includes("external-preview.redd.it")) {
+        mediaUrl = imgUrl;
+      } else if (imgUrl.includes("thumbs.redditmedia")) {
+        thumbnailUrl = imgUrl;
+      }
+    }
+
+    // Extract text body (strip HTML tags)
+    const textContent = decoded
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 500) || null;
+
+    posts.push({
+      id: idMatch[1],
+      title,
+      body: textContent && textContent.length > 30 ? textContent : null,
+      permalink: link,
+      author: tag("author") ? (tag("name") || "unknown") : "unknown",
+      mediaUrl,
+      thumbnailUrl,
+      updatedAt: tag("updated"),
+      subreddit,
+    });
+  }
+  return posts;
+}
 
 async function fetchSubredditHot(
   subreddit: string,
-): Promise<RedditPost[]> {
-  const url = `https://www.reddit.com/r/${subreddit}/hot.json?limit=${POSTS_PER_SUBREDDIT * 2}&raw_json=1`;
+): Promise<RssRedditPost[]> {
+  const url = `https://www.reddit.com/r/${subreddit}/hot.rss?limit=${POSTS_PER_SUBREDDIT * 2}`;
   const resp = await fetch(url, {
     headers: { "User-Agent": REDDIT_USER_AGENT },
   });
 
   if (!resp.ok) {
     console.log(
-      `Reddit API error for r/${subreddit}: ${resp.status} ${resp.statusText}`,
+      `Reddit RSS error for r/${subreddit}: ${resp.status} ${resp.statusText}`,
     );
     return [];
   }
 
-  const data = (await resp.json()) as {
-    data?: { children?: Array<{ data: RedditPost }> };
-  };
-  return (data?.data?.children ?? [])
-    .map((child) => child.data)
-    .filter(
-      (post) => !post.is_self || (post.selftext && post.selftext.length > 20),
-    )
-    .filter((post) => post.score >= MIN_SCORE)
-    .slice(0, POSTS_PER_SUBREDDIT);
-}
-
-function extractRedditMediaUrl(post: RedditPost): string | null {
-  if (post.preview?.images?.[0]?.source?.url) {
-    return post.preview.images[0].source.url;
-  }
-  if (
-    post.thumbnail &&
-    post.thumbnail.startsWith("http") &&
-    !post.thumbnail.includes("self") &&
-    !post.thumbnail.includes("default")
-  ) {
-    return post.thumbnail;
-  }
-  if (/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(post.url)) {
-    return post.url;
-  }
-  return null;
+  const xml = await resp.text();
+  return parseAtomFeed(xml, subreddit).slice(0, POSTS_PER_SUBREDDIT);
 }
 
 // -- Twitter helpers --
@@ -325,31 +358,27 @@ function extractTwitterMedia(
 // -- Post builders --
 
 function buildRedditPost(
-  post: RedditPost,
+  post: RssRedditPost,
   rewritten: { title: string; body: string | null },
   botUserId: string,
   gameId: string | null,
 ): Record<string, unknown> {
-  const mediaUrl = extractRedditMediaUrl(post);
-
   return {
     author_id: botUserId,
     game_id: gameId,
-    type: mediaUrl ? "image" : "news",
+    type: post.mediaUrl ? "image" : "news",
     title: rewritten.title,
     body: rewritten.body,
-    media_url: mediaUrl,
-    thumbnail_url: post.thumbnail?.startsWith("http") ? post.thumbnail : null,
+    media_url: post.mediaUrl,
+    thumbnail_url: post.thumbnailUrl,
     is_system_generated: true,
     source_kind: "curated",
     source_provider: "reddit",
     source_external_id: `reddit_${post.id}`,
     source_handle: null,
     source_url: null,
-    source_published_at: new Date(post.created_utc * 1000).toISOString(),
+    source_published_at: post.updatedAt || new Date().toISOString(),
     source_metadata: {
-      reddit_score: post.score,
-      reddit_comments: post.num_comments,
       original_subreddit: post.subreddit,
     },
   };
@@ -437,15 +466,15 @@ async function processSource(
     result.postsFetched += posts.length;
     if (posts.length > 0) {
       console.log(
-        `r/${source.source_identifier}: ${posts.length} qualifying posts`,
+        `r/${source.source_identifier}: ${posts.length} posts via RSS`,
       );
     }
     items = posts.map((post) => ({
       externalId: `reddit_${post.id}`,
       originalTitle: post.title,
-      originalBody: post.is_self ? post.selftext.slice(0, 2000) : null,
+      originalBody: post.body,
       provider: "reddit",
-      buildPost: (rewritten) =>
+      buildPost: (rewritten: { title: string; body: string | null }) =>
         buildRedditPost(post, rewritten, source.bot_user_id, source.game_id),
     }));
   }
@@ -489,7 +518,7 @@ async function processSource(
       item.originalTitle,
       item.originalBody,
       item.provider,
-      source.game_id ? [] : gameTitles, // Only pass game list for game-agnostic sources
+      gameTitles,
     );
 
     if (rewritten.skip) {
@@ -500,10 +529,11 @@ async function processSource(
 
     const appPost = item.buildPost(rewritten);
 
-    // AI game-tagging: override game_id if source is game-agnostic and AI identified a game
-    if (!source.game_id && rewritten.game) {
+    // AI game-tagging: if AI identified a game, use it (even overriding source game_id
+    // to handle cross-posted content, e.g. a Mass Effect post in r/reddeadredemption)
+    if (rewritten.game) {
       const matchedGameId = gameMap.get(rewritten.game.toLowerCase());
-      if (matchedGameId) {
+      if (matchedGameId && matchedGameId !== source.game_id) {
         appPost.game_id = matchedGameId;
         console.log(`AI tagged "${rewritten.title.slice(0, 50)}" → ${rewritten.game}`);
       }

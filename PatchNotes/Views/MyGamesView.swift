@@ -482,50 +482,29 @@ private struct FollowToggleButton: View {
         store.isFollowingGame(game)
     }
 
-    private var isBadgeGame: Bool {
-        store.currentUserBadgeGameIDs.contains(game.id)
-    }
-
     var body: some View {
-        if isBadgeGame {
-            HStack(spacing: 5) {
-                Image(systemName: "crown.fill")
-                    .font(.caption2)
-                Text("Badge")
+        Button {
+            store.toggleFollowedGame(game)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isFollowing ? "bell.fill" : "bell")
+                Text(isFollowing ? "Following" : "Follow")
             }
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.yellow.opacity(0.85))
+            .foregroundStyle(.white)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color.yellow.opacity(0.12), in: Capsule())
+            .background(
+                (isFollowing ? AppTheme.accent.opacity(0.28) : Color.white.opacity(0.12)),
+                in: Capsule()
+            )
             .overlay {
                 Capsule()
-                    .stroke(Color.yellow.opacity(0.30), lineWidth: 1)
+                    .stroke(Color.white.opacity(isFollowing ? 0.45 : 0.25), lineWidth: 1)
             }
-        } else {
-            Button {
-                store.toggleFollowedGame(game)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: isFollowing ? "bell.fill" : "bell")
-                    Text(isFollowing ? "Following" : "Follow")
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(
-                    (isFollowing ? AppTheme.accent.opacity(0.28) : Color.white.opacity(0.12)),
-                    in: Capsule()
-                )
-                .overlay {
-                    Capsule()
-                        .stroke(Color.white.opacity(isFollowing ? 0.45 : 0.25), lineWidth: 1)
-                }
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(isFollowing ? "Unfollow \(game.title)" : "Follow \(game.title)")
         }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(isFollowing ? "Unfollow \(game.title)" : "Follow \(game.title)")
     }
 }
 
@@ -650,10 +629,8 @@ struct GameBrowserView: View {
     @ViewBuilder
     private func gameTile(_ game: OnboardingGame) -> some View {
         let isFollowed = store.followedGameIDs.contains(game.id)
-        let isBadgeGame = store.currentUserBadgeGameIDs.contains(game.id)
 
         Button {
-            guard !isBadgeGame else { return }
             if isFollowed {
                 store.unfollowGameByID(game.id)
             } else {
@@ -666,20 +643,7 @@ struct GameBrowserView: View {
                         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 130, maxHeight: 130)
                         .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay {
-                            if isBadgeGame {
-                                Color.black.opacity(0.35)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            }
-                        }
-
-                    if isBadgeGame {
-                        Image(systemName: "crown.fill")
-                            .font(.title3)
-                            .foregroundStyle(.yellow)
-                            .shadow(color: .black.opacity(0.6), radius: 3, y: 1)
-                            .padding(6)
-                    } else if isFollowed {
+                    if isFollowed {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.title3)
                             .symbolRenderingMode(.palette)
@@ -691,7 +655,7 @@ struct GameBrowserView: View {
 
                 Text(game.title)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(isBadgeGame ? .white.opacity(0.55) : .white)
+                    .foregroundStyle(.white)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .frame(height: 32)
@@ -699,20 +663,19 @@ struct GameBrowserView: View {
             .padding(6)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(isBadgeGame ? Color.yellow.opacity(0.08) : (isFollowed ? AppTheme.accent.opacity(0.18) : Color.white.opacity(0.05)))
+                    .fill(isFollowed ? AppTheme.accent.opacity(0.18) : Color.white.opacity(0.05))
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(
-                        isBadgeGame ? Color.yellow.opacity(0.35) : (isFollowed ? AppTheme.accent.opacity(0.5) : Color.white.opacity(0.08)),
-                        lineWidth: isBadgeGame || isFollowed ? 2 : 1
+                        isFollowed ? AppTheme.accent.opacity(0.5) : Color.white.opacity(0.08),
+                        lineWidth: isFollowed ? 2 : 1
                     )
             }
             .scaleEffect(isFollowed ? 1.03 : 1.0)
             .animation(.spring(duration: 0.25), value: isFollowed)
         }
         .buttonStyle(.plain)
-        .disabled(isBadgeGame)
     }
 
     @ViewBuilder

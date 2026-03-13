@@ -6,11 +6,19 @@ set -euo pipefail
 # Your residential IP is not blocked by Reddit (unlike datacenter IPs).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_FILE="$SCRIPT_DIR/../logs/fetch-reddit.log"
+PROJECT_DIR="$SCRIPT_DIR/.."
+LOG_FILE="$PROJECT_DIR/logs/fetch-reddit.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
-SUPABASE_URL="${SUPABASE_URL:?Set SUPABASE_URL env var}"
-SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY:?Set SUPABASE_SERVICE_ROLE_KEY env var}"
+# Load credentials from .env.local if env vars aren't already set
+if [[ -f "$PROJECT_DIR/.env.local" ]]; then
+  set -a
+  source "$PROJECT_DIR/.env.local"
+  set +a
+fi
+
+SUPABASE_URL="${SUPABASE_URL:?Set SUPABASE_URL env var (or add to .env.local)}"
+SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY:?Set SUPABASE_SERVICE_ROLE_KEY env var (or add to .env.local)}"
 
 REDDIT_USER_AGENT="PatchNotes/1.0 (Local Bot Content Pipeline)"
 MIN_SCORE=10
