@@ -984,6 +984,25 @@ final class AppStore: ObservableObject {
             esportsMatches.insert(contentsOf: newEntries, at: 0)
         }
 
+        // Resolve matches that just dropped off the running list — they finished.
+        // Re-fetch each one individually so their state flips to .final with correct scores.
+        let droppedIDs = esportsMatches
+            .filter { $0.state == .live }
+            .compactMap(\.pandaScoreMatchID)
+            .filter { !freshByID.keys.contains($0) }
+
+        await withTaskGroup(of: (Int, EsportsMatch?).self) { group in
+            for id in droppedIDs {
+                group.addTask { (id, try? await PandaScoreService().fetchMatch(id: id)) }
+            }
+            for await (id, resolved) in group {
+                guard let resolved else { continue }
+                if let idx = esportsMatches.firstIndex(where: { $0.pandaScoreMatchID == id }) {
+                    esportsMatches[idx] = resolved
+                }
+            }
+        }
+
         // Notify for matches that just went live involving a favorite team
         let newlyLiveIDs = Set(freshByID.keys).subtracting(previouslyLiveMatchIDs)
         previouslyLiveMatchIDs = Set(freshByID.keys)

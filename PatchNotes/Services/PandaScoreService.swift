@@ -14,6 +14,7 @@ private struct PSMatch: Decodable {
     let name: String?
     let status: String
     let scheduledAt: String?
+    let endAt: String?
     let numberOfGames: Int?
     let opponents: [PSOpponentSlot]
     let results: [PSResult]
@@ -180,22 +181,16 @@ struct PandaScoreService {
         async let liveTask     = fetchRaw(endpoint: "matches/running",  sort: nil,            perPage: 50)
         async let upcomingTask = fetchRaw(endpoint: "matches/upcoming", sort: "scheduled_at", perPage: 50)
 
-        // Game-specific past endpoints with finished-only filter.
-        // The generic /matches/past returns mostly canceled matches; using per-game endpoints
-        // with filter[status]=finished gives us actual completed results.
-        async let lolPastTask   = fetchRaw(endpoint: "lol/matches/past",      sort: "-end_at", perPage: 10, statusFilter: "finished")
-        async let csgoPastTask  = fetchRaw(endpoint: "csgo/matches/past",     sort: "-end_at", perPage: 10, statusFilter: "finished")
-        async let valPastTask   = fetchRaw(endpoint: "valorant/matches/past", sort: "-end_at", perPage: 10, statusFilter: "finished")
-        async let dota2PastTask = fetchRaw(endpoint: "dota2/matches/past",    sort: "-end_at", perPage: 10, statusFilter: "finished")
+        // Game-specific past endpoints with a 7-day range[begin_at] filter.
+        // Using the generic matches/past endpoint returns 800+ results per week (all games),
+        // so per_page=100 only covers today. Game-specific calls keep counts small.
+        async let pastTask = fetchRecentPastMatches()
 
-        let live      = (try? await liveTask)      ?? []
-        let upcoming  = (try? await upcomingTask)  ?? []
-        let lolPast   = (try? await lolPastTask)   ?? []
-        let csgoPast  = (try? await csgoPastTask)  ?? []
-        let valPast   = (try? await valPastTask)   ?? []
-        let dota2Past = (try? await dota2PastTask) ?? []
+        let live     = (try? await liveTask)     ?? []
+        let upcoming = (try? await upcomingTask) ?? []
+        let past     = (try? await pastTask)     ?? []
 
-        let all = live + upcoming + lolPast + csgoPast + valPast + dota2Past
+        let all = live + upcoming + past
         guard !all.isEmpty else { throw URLError(.badServerResponse) }
 
         return all
@@ -204,6 +199,55 @@ struct PandaScoreService {
                 return Self.supportedGames[slug] != nil
             }
             .compactMap(map(_:))
+    }
+
+    /// Fetches finished matches from the past 7 days using game-specific endpoints with a
+    /// range[begin_at] filter. The generic matches/past endpoint has 800+ matches per week
+    /// across all games, making per_page=100 only cover today. Game-specific endpoints keep
+    /// counts manageable (50–100 each) and return accurate end_at values.
+    private func fetchRecentPastMatches() async throws -> [PSMatch] {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let from = Date().addingTimeInterval(-7 * 24 * 3600)
+        let to   = Date().addingTimeInterval(3600)
+        let fromEnc = formatter.string(from: from)
+            .replacingOccurrences(of: ":", with: "%3A")
+            .replacingOccurrences(of: "+", with: "%2B")
+        let toEnc = formatter.string(from: to)
+            .replacingOccurrences(of: ":", with: "%3A")
+            .replacingOccurrences(of: "+", with: "%2B")
+        let query = "per_page=100&sort=-begin_at" +
+            "&filter%5Bstatus%5D=finished" +
+            "&range%5Bbegin_at%5D=\(fromEnc)%2C\(toEnc)"
+
+        async let valTask  = fetchGamePast(game: "valorant", query: query)
+        async let lolTask  = fetchGamePast(game: "lol",      query: query)
+        async let csTask   = fetchGamePast(game: "csgo",     query: query)
+        async let dotaTask = fetchGamePast(game: "dota2",    query: query)
+
+        let results = await [
+            (try? valTask)  ?? [],
+            (try? lolTask)  ?? [],
+            (try? csTask)   ?? [],
+            (try? dotaTask) ?? []
+        ]
+        return results.flatMap { $0 }
+    }
+
+    private func fetchGamePast(game: String, query: String) async throws -> [PSMatch] {
+        var components = URLComponents(
+            url: PandaScoreConfig.baseURL.appendingPathComponent("\(game)/matches/past"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.percentEncodedQuery = query
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(PandaScoreConfig.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        return try Self.decoder.decode([PSMatch].self, from: data)
     }
 
     /// Lightweight fetch of only the currently running matches for live-score polling.
@@ -215,6 +259,25 @@ struct PandaScoreService {
                 return Self.supportedGames[slug] != nil
             }
             .compactMap(map(_:))
+    }
+
+    /// Fetches a single match by its PandaScore ID — used to resolve final state
+    /// when a match drops off the running list during live polling.
+    func fetchMatch(id: Int) async throws -> EsportsMatch? {
+        var components = URLComponents(
+            url: PandaScoreConfig.baseURL.appendingPathComponent("matches/\(id)"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = []
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(PandaScoreConfig.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        let raw = try Self.decoder.decode(PSMatch.self, from: data)
+        return map(raw)
     }
 
     func fetchHeadToHead(homeID: Int, awayID: Int) async throws -> H2HRecord {
@@ -527,6 +590,7 @@ struct PandaScoreService {
         let seriesFormat: Int? = numberOfGames > 1 ? numberOfGames : nil
         let subDetail = ps.tournament?.name ?? leagueLabel
         let scheduledAt = ps.scheduledAt.flatMap(parseDate(_:))
+        let endAt = ps.endAt.flatMap(parseDate(_:))
 
         // Prefer main+official English stream, then any main, then first
         let stream = ps.streamsList.first { $0.main && $0.official == true && $0.language == "en" }
@@ -588,7 +652,8 @@ struct PandaScoreService {
             eventName: eventName,
             games: games,
             pandaScoreMatchID: ps.id,
-            tournamentPandaID: ps.tournament?.id
+            tournamentPandaID: ps.tournament?.id,
+            endAt: endAt
         )
     }
 

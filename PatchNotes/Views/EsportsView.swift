@@ -203,10 +203,18 @@ struct EsportsView: View {
     }
 
     private var historyMatches: [EsportsMatch] {
-        leagueFilteredMatches
-            .filter { $0.state == .final }
+        let cutoff = Date().addingTimeInterval(-7 * 86_400)
+        return leagueFilteredMatches
+            .filter { match in
+                guard match.state == .final else { return false }
+                let date = match.endAt ?? match.scheduledAt
+                guard let date else { return false }
+                return date >= cutoff
+            }
             .sorted { lhs, rhs in
-                (lhs.scheduledAt ?? .distantPast) > (rhs.scheduledAt ?? .distantPast)
+                let lDate = lhs.endAt ?? lhs.scheduledAt ?? .distantPast
+                let rDate = rhs.endAt ?? rhs.scheduledAt ?? .distantPast
+                return lDate > rDate
             }
     }
 
@@ -216,7 +224,7 @@ struct EsportsView: View {
         df.dateFormat = "EEE, MMM d"
 
         let grouped = Dictionary(grouping: historyMatches) { match -> Date in
-            guard let date = match.scheduledAt else { return .distantPast }
+            let date = match.endAt ?? match.scheduledAt ?? .distantPast
             return calendar.startOfDay(for: date)
         }
 
@@ -231,10 +239,6 @@ struct EsportsView: View {
                 else                                         { label = df.string(from: dayStart) }
                 return (label: label, matches: matches)
             }
-    }
-
-    private var tickerMatches: [EsportsMatch] {
-        filteredMatches.filter { $0.state == .live || $0.state == .upcoming }
     }
 
     var body: some View {
@@ -830,7 +834,6 @@ struct EsportsView: View {
             if selectedTab == .scores {
             stateFilterBar
             teamFilterBar
-            LiveTickerView(matches: tickerMatches)
 
             if filteredMatches.isEmpty {
                 let trimmed = searchText.trimmingCharacters(in: .whitespaces)
@@ -1060,55 +1063,6 @@ private struct SkeletonMatchCard: View {
                 .stroke(Color.white.opacity(0.10), lineWidth: 1)
         }
         .redacted(reason: .placeholder)
-    }
-}
-
-// MARK: - Live Ticker
-
-private struct LiveTickerView: View {
-    let matches: [EsportsMatch]
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var tickerOffset: CGFloat = 0
-
-    private var tickerText: String {
-        let rows = matches.prefix(6).map { match in
-            "\(match.awayTeam) \(match.awayScore) - \(match.homeScore) \(match.homeTeam) · \(match.detailLine)"
-        }
-        return rows.isEmpty ? "No live matches right now" : rows.joined(separator: "     •     ")
-    }
-
-    var body: some View {
-        GeometryReader { proxy in
-            let width = max(proxy.size.width, 1)
-            HStack(spacing: 36) {
-                tickerTextView
-                tickerTextView
-            }
-            .offset(x: tickerOffset)
-            .onAppear {
-                guard !reduceMotion else { return }
-                tickerOffset = 0
-                withAnimation(.linear(duration: 18).repeatForever(autoreverses: false)) {
-                    tickerOffset = -width
-                }
-            }
-            .onChange(of: reduceMotion) { _, isReduced in
-                if isReduced { tickerOffset = 0 }
-            }
-        }
-        .frame(height: 24)
-        .clipped()
-        .background(Color.white.opacity(0.05), in: Capsule())
-        .overlay { Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1) }
-        .accessibilityLabel("Live ticker")
-    }
-
-    private var tickerTextView: some View {
-        Text(tickerText)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.86))
-            .lineLimit(1)
     }
 }
 

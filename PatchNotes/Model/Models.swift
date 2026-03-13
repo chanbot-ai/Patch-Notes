@@ -209,6 +209,7 @@ struct EsportsMatch: Identifiable, Hashable {
     let games: [MatchGame]
     let pandaScoreMatchID: Int?
     let tournamentPandaID: Int?
+    let endAt: Date?
 
     init(
         id: UUID,
@@ -233,7 +234,8 @@ struct EsportsMatch: Identifiable, Hashable {
         eventName: String? = nil,
         games: [MatchGame] = [],
         pandaScoreMatchID: Int? = nil,
-        tournamentPandaID: Int? = nil
+        tournamentPandaID: Int? = nil,
+        endAt: Date? = nil
     ) {
         self.id = id
         self.league = league
@@ -258,6 +260,7 @@ struct EsportsMatch: Identifiable, Hashable {
         self.games = games
         self.pandaScoreMatchID = pandaScoreMatchID
         self.tournamentPandaID = tournamentPandaID
+        self.endAt = endAt
     }
 
     /// Stable notification identifier derived from match content rather than the
