@@ -208,6 +208,7 @@ struct EsportsMatch: Identifiable, Hashable {
     let eventName: String?
     let games: [MatchGame]
     let pandaScoreMatchID: Int?
+    let tournamentPandaID: Int?
 
     init(
         id: UUID,
@@ -231,7 +232,8 @@ struct EsportsMatch: Identifiable, Hashable {
         awayTeamPandaID: Int? = nil,
         eventName: String? = nil,
         games: [MatchGame] = [],
-        pandaScoreMatchID: Int? = nil
+        pandaScoreMatchID: Int? = nil,
+        tournamentPandaID: Int? = nil
     ) {
         self.id = id
         self.league = league
@@ -255,6 +257,7 @@ struct EsportsMatch: Identifiable, Hashable {
         self.eventName = eventName
         self.games = games
         self.pandaScoreMatchID = pandaScoreMatchID
+        self.tournamentPandaID = tournamentPandaID
     }
 
     /// Stable notification identifier derived from match content rather than the
@@ -313,6 +316,52 @@ struct PlayerDetails {
     let role: String?
     let currentTeamName: String?
     let currentTeamLogoURL: URL?
+}
+
+struct TeamInfo {
+    let id: Int
+    let name: String
+    let acronym: String?
+    let location: String?
+    let logoURL: URL?
+}
+
+/// Lightweight navigation token used to open TeamDetailView from match cards or rosters.
+struct SelectedTeamInfo: Identifiable, Hashable {
+    let name: String
+    let pandaID: Int?
+    let logoURL: URL?
+
+    var id: String { name }
+
+    func hash(into hasher: inout Hasher) { hasher.combine(name) }
+    static func == (lhs: SelectedTeamInfo, rhs: SelectedTeamInfo) -> Bool { lhs.name == rhs.name }
+}
+
+struct SelectedTournamentInfo: Identifiable, Hashable {
+    let id: Int   // PandaScore tournament ID
+    let name: String
+    let league: String
+
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    static func == (lhs: SelectedTournamentInfo, rhs: SelectedTournamentInfo) -> Bool { lhs.id == rhs.id }
+}
+
+struct TournamentInfo {
+    let id: Int
+    let name: String
+    let league: String
+    let beginAt: Date?
+    let endAt: Date?
+    let prizepool: String?
+    let format: String?   // "single_elimination", "double_elimination", "round_robin", "swiss", "groups"
+}
+
+struct BracketRound: Identifiable {
+    let id: String        // round label used as stable identifier
+    let name: String      // display name e.g. "Quarterfinals"
+    let matches: [EsportsMatch]
+    let isFinal: Bool     // highlights the last round
 }
 
 enum GameStatus: Hashable {

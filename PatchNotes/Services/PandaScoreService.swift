@@ -102,6 +102,24 @@ private struct PSPlayer: Decodable {
     let imageUrl: String?
 }
 
+private struct PSTeam: Decodable {
+    let id: Int
+    let name: String
+    let acronym: String?
+    let location: String?
+    let imageUrl: String?
+}
+
+private struct PSTournamentDetail: Decodable {
+    let id: Int
+    let name: String
+    let prizepool: String?
+    let beginAt: String?
+    let endAt: String?
+    let league: PSLeague?
+    let videogame: PSVideogame?
+}
+
 private struct PSPlayerDetail: Decodable {
     let id: Int
     let name: String
@@ -297,6 +315,158 @@ struct PandaScoreService {
         )
     }
 
+    func fetchTournamentInfo(tournamentID: Int) async throws -> TournamentInfo {
+        let url = PandaScoreConfig.baseURL.appendingPathComponent("tournaments/\(tournamentID)")
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(PandaScoreConfig.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        let raw = try Self.decoder.decode(PSTournamentDetail.self, from: data)
+        let league = Self.supportedGames[raw.videogame?.slug ?? ""] ?? (raw.league?.name ?? raw.name)
+        return TournamentInfo(
+            id: raw.id,
+            name: raw.name,
+            league: league,
+            beginAt: raw.beginAt.flatMap(parseDate(_:)),
+            endAt: raw.endAt.flatMap(parseDate(_:)),
+            prizepool: raw.prizepool,
+            format: nil
+        )
+    }
+
+    func fetchTournamentBracket(tournamentID: Int) async throws -> [BracketRound] {
+        var components = URLComponents(
+            url: PandaScoreConfig.baseURL.appendingPathComponent("tournaments/\(tournamentID)/matches"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.percentEncodedQuery = "per_page=50&sort=begin_at"
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(PandaScoreConfig.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        let rawMatches = try Self.decoder.decode([PSMatch].self, from: data)
+        guard !rawMatches.isEmpty else { return [] }
+
+        // Group by round label derived from the raw PSMatch.name field
+        var orderedKeys: [String] = []
+        var grouped: [String: [EsportsMatch]] = [:]
+        for raw in rawMatches {
+            guard let match = map(raw) else { continue }
+            let label = Self.roundLabel(from: raw.name)
+            if grouped[label] == nil { orderedKeys.append(label); grouped[label] = [] }
+            grouped[label]!.append(match)
+        }
+        guard !grouped.isEmpty else { return [] }
+
+        // Sort keys by round priority then build BracketRound array
+        let sorted = orderedKeys.sorted { Self.roundPriority($0) < Self.roundPriority($1) }
+        return sorted.enumerated().map { idx, key in
+            BracketRound(
+                id: key,
+                name: key,
+                matches: grouped[key] ?? [],
+                isFinal: idx == sorted.count - 1
+            )
+        }
+    }
+
+    // Extract a normalised round label from a match name string
+    private static func roundLabel(from text: String?) -> String {
+        guard let t = text else { return "Matches" }
+        let lower = t.lowercased()
+        if lower.contains("grand final")                       { return "Grand Final" }
+        if lower.contains("final") && !lower.contains("semi")
+                                   && !lower.contains("quarter") { return "Final" }
+        if lower.contains("semi")                              { return "Semifinals" }
+        if lower.contains("quarter")                           { return "Quarterfinals" }
+        if lower.contains("upper")                             { return "Upper Bracket" }
+        if lower.contains("lower")                             { return "Lower Bracket" }
+        if lower.contains("play-in") || lower.contains("play in") { return "Play-ins" }
+        if lower.contains("qualifier")                         { return "Qualifiers" }
+        if lower.contains("group")                             { return "Group Stage" }
+        if let range = t.range(of: #"(?i)round\s+\d+"#, options: .regularExpression) {
+            return String(t[range]).capitalized
+        }
+        return "Matches"
+    }
+
+    private static func roundPriority(_ label: String) -> Int {
+        switch label {
+        case "Qualifiers":      return 0
+        case "Play-ins":        return 1
+        case "Group Stage":     return 2
+        case "Upper Bracket":   return 3
+        case "Lower Bracket":   return 4
+        case "Quarterfinals":   return 5
+        case "Semifinals":      return 6
+        case "Final":           return 7
+        case "Grand Final":     return 8
+        default:                return 3
+        }
+    }
+
+    func fetchTeamInfo(teamID: Int) async throws -> TeamInfo {
+        let url = PandaScoreConfig.baseURL.appendingPathComponent("teams/\(teamID)")
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(PandaScoreConfig.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        let raw = try Self.decoder.decode(PSTeam.self, from: data)
+        return TeamInfo(
+            id: raw.id,
+            name: raw.name,
+            acronym: raw.acronym,
+            location: raw.location,
+            logoURL: raw.imageUrl.flatMap { URL(string: $0) }
+        )
+    }
+
+    func fetchTeamRecentMatches(teamID: Int) async throws -> [EsportsMatch] {
+        var components = URLComponents(
+            url: PandaScoreConfig.baseURL.appendingPathComponent("matches/past"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.percentEncodedQuery =
+            "per_page=10&sort=-end_at" +
+            "&filter%5Bopponent_id%5D=\(teamID)" +
+            "&filter%5Bstatus%5D=finished"
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(PandaScoreConfig.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        return try Self.decoder.decode([PSMatch].self, from: data).compactMap(map(_:))
+    }
+
+    func fetchTeamUpcomingMatches(teamID: Int) async throws -> [EsportsMatch] {
+        var components = URLComponents(
+            url: PandaScoreConfig.baseURL.appendingPathComponent("matches/upcoming"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.percentEncodedQuery =
+            "per_page=5&sort=scheduled_at" +
+            "&filter%5Bopponent_id%5D=\(teamID)"
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(PandaScoreConfig.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        return try Self.decoder.decode([PSMatch].self, from: data).compactMap(map(_:))
+    }
+
     // MARK: - Private
 
     private func fetchRaw(endpoint: String, sort: String?, perPage: Int, statusFilter: String? = nil) async throws -> [PSMatch] {
@@ -417,7 +587,8 @@ struct PandaScoreService {
             awayTeamPandaID: away.id,
             eventName: eventName,
             games: games,
-            pandaScoreMatchID: ps.id
+            pandaScoreMatchID: ps.id,
+            tournamentPandaID: ps.tournament?.id
         )
     }
 

@@ -12,6 +12,8 @@ struct MatchDetailView: View {
     @State private var rosterIsLoading = false
     @State private var h2hRecord: H2HRecord? = nil
     @State private var selectedPlayer: RosterPlayer? = nil
+    @State private var selectedTeamInfo: SelectedTeamInfo? = nil
+    @State private var selectedTournamentInfo: SelectedTournamentInfo? = nil
 
     private var matchMarkets: [EsportsMarket] {
         let teams: Set<String> = [match.homeTeam, match.awayTeam]
@@ -29,7 +31,11 @@ struct MatchDetailView: View {
 
                 ScrollView {
                     VStack(spacing: 20) {
-                        MatchHeaderSection(match: match)
+                        MatchHeaderSection(
+                    match: match,
+                    onTeamTap: { selectedTeamInfo = $0 },
+                    onEventTap: { selectedTournamentInfo = $0 }
+                )
                         if match.games.count > 1, match.state != .upcoming {
                             MapTimelineSection(match: match)
                         }
@@ -70,6 +76,12 @@ struct MatchDetailView: View {
             .navigationDestination(item: $selectedPlayer) { player in
                 PlayerDetailView(player: player, league: match.league)
             }
+            .navigationDestination(item: $selectedTeamInfo) { team in
+                TeamDetailView(team: team)
+            }
+            .navigationDestination(item: $selectedTournamentInfo) { tournament in
+                TournamentDetailView(tournament: tournament)
+            }
             .navigationTitle(match.league)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -87,6 +99,8 @@ struct MatchDetailView: View {
 
 private struct MatchHeaderSection: View {
     let match: EsportsMatch
+    var onTeamTap: ((SelectedTeamInfo) -> Void)? = nil
+    var onEventTap: ((SelectedTournamentInfo) -> Void)? = nil
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -114,16 +128,29 @@ private struct MatchHeaderSection: View {
     var body: some View {
         VStack(spacing: 16) {
             if let event = match.eventName {
-                HStack(spacing: 5) {
-                    Image(systemName: "trophy.fill")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(AppTheme.accent)
-                    Text(event)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .lineLimit(1)
+                Button {
+                    if let tid = match.tournamentPandaID {
+                        onEventTap?(SelectedTournamentInfo(id: tid, name: event, league: match.league))
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "trophy.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                        Text(event)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
+                        if match.tournamentPandaID != nil {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.30))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
+                .buttonStyle(.plain)
+                .disabled(match.tournamentPandaID == nil)
             }
 
             if let date = match.scheduledAt {
@@ -139,14 +166,23 @@ private struct MatchHeaderSection: View {
             }
 
             HStack(alignment: .center, spacing: 0) {
-                VStack(spacing: 8) {
-                    TeamLogoBadge(team: match.awayTeam, size: 52, overrideURL: match.awayLogoURL)
-                    Text(match.awayTeam)
-                        .font(.title3.weight(.black))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
+                Button {
+                    onTeamTap?(SelectedTeamInfo(
+                        name: match.awayTeam,
+                        pandaID: match.awayTeamPandaID,
+                        logoURL: match.awayLogoURL
+                    ))
+                } label: {
+                    VStack(spacing: 8) {
+                        TeamLogoBadge(team: match.awayTeam, size: 52, overrideURL: match.awayLogoURL)
+                        Text(match.awayTeam)
+                            .font(.title3.weight(.black))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
+                .buttonStyle(.plain)
 
                 VStack(spacing: 6) {
                     if match.state == .upcoming {
@@ -165,24 +201,49 @@ private struct MatchHeaderSection: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                VStack(spacing: 8) {
-                    TeamLogoBadge(team: match.homeTeam, size: 52, overrideURL: match.homeLogoURL)
-                    Text(match.homeTeam)
-                        .font(.title3.weight(.black))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
+                Button {
+                    onTeamTap?(SelectedTeamInfo(
+                        name: match.homeTeam,
+                        pandaID: match.homeTeamPandaID,
+                        logoURL: match.homeLogoURL
+                    ))
+                } label: {
+                    VStack(spacing: 8) {
+                        TeamLogoBadge(team: match.homeTeam, size: 52, overrideURL: match.homeLogoURL)
+                        Text(match.homeTeam)
+                            .font(.title3.weight(.black))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
+                .buttonStyle(.plain)
             }
 
             if match.state == .live, let url = match.streamURL {
+                let isTwitch = url.host?.contains("twitch.tv") == true
                 Link(destination: url) {
-                    Label("Watch Live", systemImage: "play.tv.fill")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(.red.opacity(0.85), in: Capsule())
+                    HStack(spacing: 8) {
+                        if isTwitch {
+                            TwitchLogoMark(size: 18)
+                            Text("Watch on Twitch")
+                                .font(.subheadline.weight(.bold))
+                        } else {
+                            Image(systemName: "play.tv.fill")
+                            Text("Watch Live")
+                                .font(.subheadline.weight(.bold))
+                        }
+                    }
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        isTwitch
+                            ? Color(red: 0.569, green: 0.275, blue: 1.0)
+                            : Color.red.opacity(0.85),
+                        in: Capsule()
+                    )
                 }
             }
 
@@ -1038,5 +1099,45 @@ private struct PlayerInfoRow: View {
                 .multilineTextAlignment(.trailing)
         }
         .padding(.vertical, 10)
+    }
+}
+
+// MARK: - Twitch Logo Mark
+
+private struct TwitchLogoMark: View {
+    var size: CGFloat = 18
+
+    var body: some View {
+        ZStack {
+            // Bubble body + tail drawn in white
+            Canvas { ctx, sz in
+                let w = sz.width, h = sz.height
+                let bodyH = h * 0.78
+                let r = CGSize(width: w * 0.18, height: w * 0.18)
+
+                // Rounded body
+                let body = Path(roundedRect: CGRect(x: 0, y: 0, width: w, height: bodyH), cornerSize: r)
+                ctx.fill(body, with: .foreground)
+
+                // Bottom-left tail
+                var tail = Path()
+                tail.move(to:    CGPoint(x: w * 0.18, y: bodyH))
+                tail.addLine(to: CGPoint(x: w * 0.18, y: h))
+                tail.addLine(to: CGPoint(x: w * 0.40, y: bodyH))
+                tail.closeSubpath()
+                ctx.fill(tail, with: .foreground)
+            }
+            .foregroundStyle(.white)
+
+            // Two vertical bar cutouts
+            HStack(spacing: size * 0.11) {
+                Capsule().frame(width: size * 0.10, height: size * 0.32)
+                Capsule().frame(width: size * 0.10, height: size * 0.32)
+            }
+            .offset(y: -size * 0.07)
+            .blendMode(.destinationOut)
+        }
+        .compositingGroup()
+        .frame(width: size * 0.76, height: size)
     }
 }

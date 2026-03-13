@@ -97,11 +97,14 @@ struct EsportsView: View {
     @State private var showStandingsSheet = false
     @State private var standingsLeague = ""
     @State private var hasInitiallyLoaded = false
-    @State private var selectedStateFilter: EsportsStateFilter = .all
+    @State private var selectedStateFilter: EsportsStateFilter? = nil
     @State private var searchText = ""
     @State private var isSearching = false
     @FocusState private var searchFocused: Bool
     @State private var selectedTab: EsportsTab = .scores
+    @State private var showFavoritesSheet = false
+    @State private var selectedTeamInfo: SelectedTeamInfo? = nil
+    @State private var selectedTournamentInfo: SelectedTournamentInfo? = nil
 
     private var availableFilters: [EsportsLeagueFilter] {
         let leagues = Array(Set(store.esportsMatches.map(\.league))).sorted()
@@ -121,7 +124,7 @@ struct EsportsView: View {
     private var baseFilteredMatches: [EsportsMatch] {
         var base = leagueFilteredMatches
         switch selectedStateFilter {
-        case .all:
+        case .none, .all:
             break
         case .live:
             base = base.filter { $0.state == .live }
@@ -165,10 +168,31 @@ struct EsportsView: View {
         }
     }
 
-    private var featuredMatch: EsportsMatch? {
-        filteredMatches.first(where: \.isFeatured) ??
-            filteredMatches.first(where: { $0.state == .live }) ??
-            filteredMatches.first
+    private var yourTeamsMatches: [EsportsMatch] {
+        guard !store.favoriteTeams.isEmpty else { return [] }
+        let calendar = Calendar.current
+        let matches = store.esportsMatches.filter { match in
+            guard store.isFavoriteTeam(match.homeTeam) || store.isFavoriteTeam(match.awayTeam)
+            else { return false }
+            switch match.state {
+            case .live: return true
+            case .upcoming, .final:
+                guard let date = match.scheduledAt else { return false }
+                return calendar.isDateInToday(date)
+            }
+        }
+        return matches.sorted { a, b in
+            func priority(_ m: EsportsMatch) -> Int {
+                switch m.state {
+                case .live:     return 0
+                case .upcoming: return 1
+                case .final:    return 2
+                }
+            }
+            let ap = priority(a), bp = priority(b)
+            if ap != bp { return ap < bp }
+            return (a.scheduledAt ?? .distantPast) < (b.scheduledAt ?? .distantPast)
+        }
     }
 
     private var groupedSections: [LeagueScoreSection] {
@@ -245,6 +269,36 @@ struct EsportsView: View {
         .onDisappear { store.stopLiveScorePolling() }
         .navigationTitle("Esports")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showFavoritesSheet = true
+                } label: {
+                    Image(systemName: store.favoriteTeams.isEmpty ? "star" : "star.fill")
+                        .foregroundStyle(store.favoriteTeams.isEmpty ? .white.opacity(0.72) : .yellow)
+                }
+            }
+        }
+        .sheet(isPresented: $showFavoritesSheet) {
+            FavoriteTeamsSheet()
+                .environmentObject(store)
+        }
+        .sheet(item: $selectedTeamInfo) { team in
+            NavigationStack {
+                TeamDetailView(team: team)
+                    .environmentObject(store)
+            }
+            .preferredColorScheme(.dark)
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $selectedTournamentInfo) { tournament in
+            NavigationStack {
+                TournamentDetailView(tournament: tournament)
+                    .environmentObject(store)
+            }
+            .preferredColorScheme(.dark)
+            .presentationDragIndicator(.visible)
+        }
         .onChange(of: selectedFilter) { _, _ in
             withAnimation(.spring(duration: 0.25)) { selectedTeam = nil }
         }
@@ -330,51 +384,74 @@ struct EsportsView: View {
 
     // MARK: - State Filter Bar (Live / Upcoming / Final)
 
+    private func matchCount(for filter: EsportsStateFilter) -> Int {
+        switch filter {
+        case .all:       return leagueFilteredMatches.count
+        case .live:      return leagueFilteredMatches.filter { $0.state == .live }.count
+        case .upcoming:  return leagueFilteredMatches.filter { $0.state == .upcoming }.count
+        case .completed: return leagueFilteredMatches.filter { $0.state == .final }.count
+        }
+    }
+
     private var stateFilterBar: some View {
-        HStack(spacing: 8) {
-            ForEach(EsportsStateFilter.allCases) { filter in
-                Button {
-                    withAnimation(.spring(duration: 0.22)) {
-                        selectedStateFilter = filter
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        if filter == .live {
-                            LivePulseDot()
-                                .scaleEffect(0.72)
-                        } else {
-                            Image(systemName: filter.systemImage)
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(
-                                    selectedStateFilter == filter ? filter.color : .white.opacity(0.60)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach([EsportsStateFilter.live, .upcoming, .completed]) { filter in
+                    let count = matchCount(for: filter)
+                    let isSelected = selectedStateFilter == filter
+                    Button {
+                        withAnimation(.spring(duration: 0.22)) {
+                            selectedStateFilter = isSelected ? nil : filter
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            if filter == .live {
+                                LivePulseDot()
+                                    .scaleEffect(0.72)
+                            } else {
+                                Image(systemName: filter.systemImage)
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(isSelected ? filter.color : .white.opacity(0.60))
+                            }
+                            Text(filter.rawValue)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                            if count > 0 {
+                                Text("\(count)")
+                                    .font(.system(size: 10, weight: .black, design: .rounded))
+                                    .foregroundStyle(isSelected ? filter.color : .white.opacity(0.55))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        isSelected
+                                            ? filter.color.opacity(0.25)
+                                            : Color.white.opacity(0.12),
+                                        in: Capsule()
+                                    )
+                                    .animation(.spring(duration: 0.3), value: count)
+                            }
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            isSelected ? filter.color.opacity(0.22) : Color.white.opacity(0.07),
+                            in: Capsule()
+                        )
+                        .overlay {
+                            Capsule()
+                                .stroke(
+                                    isSelected ? filter.color.opacity(0.60) : Color.white.opacity(0.10),
+                                    lineWidth: 1
                                 )
                         }
-                        Text(filter.rawValue)
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        selectedStateFilter == filter
-                            ? filter.color.opacity(0.22)
-                            : Color.white.opacity(0.07),
-                        in: Capsule()
-                    )
-                    .overlay {
-                        Capsule()
-                            .stroke(
-                                selectedStateFilter == filter
-                                    ? filter.color.opacity(0.60)
-                                    : Color.white.opacity(0.10),
-                                lineWidth: 1
-                            )
-                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(isSelected ? "Deselect" : "Show") \(filter.rawValue) matches, \(count) total")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Show \(filter.rawValue) matches")
             }
-            Spacer()
         }
     }
 
@@ -772,17 +849,35 @@ struct EsportsView: View {
                 .padding(.vertical, 20)
             }
 
-            if let featuredMatch {
+            if !yourTeamsMatches.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Featured Today")
+                    Text("Your Teams")
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white.opacity(0.82))
-                    Button {
-                        selectedMatch = featuredMatch
-                    } label: {
-                        FeaturedMatchCard(match: featuredMatch)
+                    if yourTeamsMatches.count == 1, let match = yourTeamsMatches.first {
+                        Button { selectedMatch = match } label: {
+                            FeaturedMatchCard(match: match,
+                                             onTeamTap: { selectedTeamInfo = $0 },
+                                             onEventTap: { selectedTournamentInfo = $0 })
+                        }
+                        .buttonStyle(PressableButtonStyle())
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(yourTeamsMatches) { match in
+                                    Button { selectedMatch = match } label: {
+                                        FeaturedMatchCard(match: match,
+                                                         onTeamTap: { selectedTeamInfo = $0 },
+                                                         onEventTap: { selectedTournamentInfo = $0 })
+                                            .containerRelativeFrame(.horizontal) { w, _ in w - 20 }
+                                    }
+                                    .buttonStyle(PressableButtonStyle())
+                                }
+                            }
+                            .scrollTargetLayout()
+                        }
+                        .scrollTargetBehavior(.viewAligned)
                     }
-                    .buttonStyle(PressableButtonStyle())
                 }
             }
 
@@ -1021,6 +1116,8 @@ private struct LiveTickerView: View {
 
 private struct FeaturedMatchCard: View {
     let match: EsportsMatch
+    var onTeamTap: ((SelectedTeamInfo) -> Void)? = nil
+    var onEventTap: ((SelectedTournamentInfo) -> Void)? = nil
 
     private var awayWon: Bool? {
         guard match.state == .final else { return nil }
@@ -1039,7 +1136,10 @@ private struct FeaturedMatchCard: View {
                 score: match.awayScore,
                 isWinner: awayWon,
                 seriesFormat: match.seriesFormat,
-                logoURL: match.awayLogoURL
+                logoURL: match.awayLogoURL,
+                onTap: onTeamTap.map { cb in {
+                    cb(SelectedTeamInfo(name: match.awayTeam, pandaID: match.awayTeamPandaID, logoURL: match.awayLogoURL))
+                }}
             )
             TeamScoreRow(
                 team: match.homeTeam,
@@ -1047,14 +1147,33 @@ private struct FeaturedMatchCard: View {
                 score: match.homeScore,
                 isWinner: homeWon,
                 seriesFormat: match.seriesFormat,
-                logoURL: match.homeLogoURL
+                logoURL: match.homeLogoURL,
+                onTap: onTeamTap.map { cb in {
+                    cb(SelectedTeamInfo(name: match.homeTeam, pandaID: match.homeTeamPandaID, logoURL: match.homeLogoURL))
+                }}
             )
             HStack {
                 matchStatePill
                 Spacer()
-                Text(match.subDetail)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.68))
+                if let tid = match.tournamentPandaID, let cb = onEventTap {
+                    Button {
+                        cb(SelectedTournamentInfo(id: tid, name: match.subDetail, league: match.league))
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(match.subDetail)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.68))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.30))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(match.subDetail)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.68))
+                }
             }
         }
         .padding(11)
@@ -1102,13 +1221,26 @@ private struct TeamScoreRow: View {
     var isWinner: Bool? = nil
     var seriesFormat: Int? = nil
     var logoURL: URL? = nil
+    var onTap: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 8) {
-            TeamLogoBadge(team: team, overrideURL: logoURL)
-            Text(team)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(nameColor)
+            if let onTap {
+                Button { onTap() } label: {
+                    HStack(spacing: 6) {
+                        TeamLogoBadge(team: team, overrideURL: logoURL)
+                        Text(team)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(nameColor)
+                    }
+                }
+                .buttonStyle(.plain)
+            } else {
+                TeamLogoBadge(team: team, overrideURL: logoURL)
+                Text(team)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(nameColor)
+            }
             Text(record)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.56))
@@ -1546,6 +1678,209 @@ private struct HistoryMatchRow: View {
     }
 }
 
+// MARK: - Favorite Teams Sheet
+
+private struct FavoriteTeamsSheet: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+    @FocusState private var searchFocused: Bool
+
+    private struct KnownTeam: Identifiable {
+        let name: String
+        let logoURL: URL?
+        var id: String { name }
+    }
+
+    // Well-known orgs always available regardless of live match data
+    private static let wellKnownOrgs: [KnownTeam] = [
+        KnownTeam(name: "100 Thieves",   logoURL: nil),
+        KnownTeam(name: "Astralis",      logoURL: nil),
+        KnownTeam(name: "BetBoom",       logoURL: nil),
+        KnownTeam(name: "Cloud9",        logoURL: nil),
+        KnownTeam(name: "Complexity",    logoURL: nil),
+        KnownTeam(name: "Dignitas",      logoURL: nil),
+        KnownTeam(name: "DRX",           logoURL: nil),
+        KnownTeam(name: "Evil Geniuses", logoURL: nil),
+        KnownTeam(name: "FaZe",          logoURL: nil),
+        KnownTeam(name: "Fnatic",        logoURL: nil),
+        KnownTeam(name: "FURIA",         logoURL: nil),
+        KnownTeam(name: "G2",            logoURL: nil),
+        KnownTeam(name: "Gen.G",         logoURL: nil),
+        KnownTeam(name: "Heroic",        logoURL: nil),
+        KnownTeam(name: "Immortals",     logoURL: nil),
+        KnownTeam(name: "KT Rolster",    logoURL: nil),
+        KnownTeam(name: "Liquid",        logoURL: nil),
+        KnownTeam(name: "Loud",          logoURL: nil),
+        KnownTeam(name: "MIBR",          logoURL: nil),
+        KnownTeam(name: "MOUZ",          logoURL: nil),
+        KnownTeam(name: "Natus Vincere", logoURL: nil),
+        KnownTeam(name: "NRG",           logoURL: nil),
+        KnownTeam(name: "OG",            logoURL: nil),
+        KnownTeam(name: "OpTic",         logoURL: nil),
+        KnownTeam(name: "paiN Gaming",   logoURL: nil),
+        KnownTeam(name: "Paper Rex",     logoURL: nil),
+        KnownTeam(name: "Sentinels",     logoURL: nil),
+        KnownTeam(name: "SK Gaming",     logoURL: nil),
+        KnownTeam(name: "T1",            logoURL: nil),
+        KnownTeam(name: "Team Falcons",  logoURL: nil),
+        KnownTeam(name: "Team Secret",   logoURL: nil),
+        KnownTeam(name: "Team Spirit",   logoURL: nil),
+        KnownTeam(name: "TSM",           logoURL: nil),
+        KnownTeam(name: "Virtus.pro",    logoURL: nil),
+        KnownTeam(name: "Vitality",      logoURL: nil),
+    ]
+
+    private var allTeams: [KnownTeam] {
+        var seen = Set<String>()
+        var teams: [KnownTeam] = []
+        // Live match teams first — they carry PandaScore logo URLs
+        for match in store.esportsMatches {
+            if seen.insert(match.homeTeam).inserted {
+                teams.append(KnownTeam(name: match.homeTeam, logoURL: match.homeLogoURL))
+            }
+            if seen.insert(match.awayTeam).inserted {
+                teams.append(KnownTeam(name: match.awayTeam, logoURL: match.awayLogoURL))
+            }
+        }
+        // Merge in well-known orgs not already present
+        for org in Self.wellKnownOrgs where seen.insert(org.name).inserted {
+            teams.append(org)
+        }
+        return teams.sorted { a, b in
+            let aFav = store.isFavoriteTeam(a.name)
+            let bFav = store.isFavoriteTeam(b.name)
+            if aFav != bFav { return aFav }
+            return a.name < b.name
+        }
+    }
+
+    private var filteredTeams: [KnownTeam] {
+        let trimmed = searchText.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return allTeams }
+        let q = trimmed.lowercased()
+        return allTeams.filter { $0.name.lowercased().contains(q) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground().ignoresSafeArea()
+
+                ScrollView {
+                        LazyVStack(spacing: 0) {
+                            // Search bar
+                            HStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundStyle(.white.opacity(0.40))
+                                TextField("Search teams…", text: $searchText)
+                                    .foregroundStyle(.white)
+                                    .tint(AppTheme.accent)
+                                    .focused($searchFocused)
+                                    .autocorrectionDisabled()
+                                if !searchText.isEmpty {
+                                    Button { searchText = "" } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundStyle(.white.opacity(0.35))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 16)
+                            .padding(.bottom, 8)
+
+                            if filteredTeams.isEmpty {
+                                VStack(spacing: 10) {
+                                    Image(systemName: "magnifyingglass")
+                                        .font(.system(size: 28))
+                                        .foregroundStyle(.white.opacity(0.25))
+                                    Text("No results for \"\(searchText)\"")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.white.opacity(0.45))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 40)
+                            } else {
+                                VStack(spacing: 0) {
+                                    ForEach(Array(filteredTeams.enumerated()), id: \.element.id) { index, team in
+                                        FavoriteTeamRow(team: team.name, logoURL: team.logoURL)
+                                        if index < filteredTeams.count - 1 {
+                                            Divider()
+                                                .background(Color.white.opacity(0.07))
+                                                .padding(.leading, 58)
+                                        }
+                                    }
+                                }
+                                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 20)
+                            }
+                        }
+                        .animation(.spring(duration: 0.28), value: filteredTeams.map(\.id))
+                    }
+            }
+            .navigationTitle("Favorite Teams")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(AppTheme.accent)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .onAppear { searchFocused = false }
+    }
+}
+
+private struct FavoriteTeamRow: View {
+    @EnvironmentObject private var store: AppStore
+    let team: String
+    let logoURL: URL?
+
+    private var isFavorite: Bool { store.isFavoriteTeam(team) }
+
+    var body: some View {
+        Button {
+            withAnimation(.spring(duration: 0.22)) {
+                store.toggleFavoriteTeam(team)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                TeamLogoBadge(team: team, size: 36, overrideURL: logoURL)
+
+                Text(team)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Image(systemName: isFavorite ? "star.fill" : "star")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(isFavorite ? .yellow : .white.opacity(0.30))
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Upcoming Matches Sheet
 
 private struct UpcomingMatchesSheet: View {
@@ -1597,5 +1932,589 @@ private struct UpcomingMatchesSheet: View {
             }
         }
         .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - Team Detail View
+
+struct TeamDetailView: View {
+    let team: SelectedTeamInfo
+
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var teamInfo: TeamInfo? = nil
+    @State private var roster: [RosterPlayer] = []
+    @State private var recentMatches: [EsportsMatch] = []
+    @State private var upcomingMatches: [EsportsMatch] = []
+    @State private var isLoading = true
+
+    private var isFavorite: Bool { store.isFavoriteTeam(team.name) }
+
+    var body: some View {
+        ZStack {
+            AppBackground().ignoresSafeArea()
+            if isLoading {
+                ProgressView().tint(.white)
+            } else {
+                ScrollView {
+                    VStack(spacing: 16) {
+                        heroCard
+                        if !recentMatches.isEmpty  { recentFormCard }
+                        if !roster.isEmpty          { rosterCard }
+                        if !upcomingMatches.isEmpty { upcomingCard }
+                        if !recentMatches.isEmpty  { resultsCard }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 20)
+                }
+            }
+        }
+        .navigationTitle(team.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+                    .foregroundStyle(AppTheme.accent)
+            }
+        }
+        .task { await loadData() }
+    }
+
+    private func loadData() async {
+        guard let pandaID = team.pandaID else { isLoading = false; return }
+        let service = PandaScoreService()
+        async let infoTask     = service.fetchTeamInfo(teamID: pandaID)
+        async let rosterTask   = service.fetchTeamPlayers(teamID: pandaID)
+        async let recentTask   = service.fetchTeamRecentMatches(teamID: pandaID)
+        async let upcomingTask = service.fetchTeamUpcomingMatches(teamID: pandaID)
+        teamInfo        = try? await infoTask
+        roster          = (try? await rosterTask)   ?? []
+        recentMatches   = (try? await recentTask)   ?? []
+        upcomingMatches = (try? await upcomingTask) ?? []
+        isLoading = false
+    }
+
+    private var heroCard: some View {
+        GlassCard {
+            VStack(spacing: 14) {
+                HStack(spacing: 16) {
+                    TeamLogoBadge(team: team.name, size: 72, overrideURL: team.logoURL)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(team.name)
+                            .font(.title3.weight(.black))
+                            .foregroundStyle(.white)
+                        if let acronym = teamInfo?.acronym, !acronym.isEmpty {
+                            Text(acronym)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.50))
+                        }
+                        if let loc = teamInfo?.location, !loc.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "mappin.circle")
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.accent)
+                                Text(loc)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.65))
+                            }
+                        }
+                    }
+                    Spacer()
+                }
+                Button {
+                    withAnimation(.spring(duration: 0.22)) { store.toggleFavoriteTeam(team.name) }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isFavorite ? "star.fill" : "star")
+                            .contentTransition(.symbolEffect(.replace))
+                        Text(isFavorite ? "Favorited" : "Add to Favorites")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(isFavorite ? .yellow : .white.opacity(0.72))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        isFavorite ? Color.yellow.opacity(0.15) : Color.white.opacity(0.09),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(isFavorite ? Color.yellow.opacity(0.30) : Color.white.opacity(0.12), lineWidth: 1)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var recentFormCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("RECENT FORM")
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .tracking(1)
+                HStack(spacing: 6) {
+                    ForEach(Array(recentMatches.prefix(5).enumerated()), id: \.offset) { _, match in
+                        let teamIsHome = match.homeTeam == team.name
+                        let won = teamIsHome ? match.homeScore > match.awayScore
+                                             : match.awayScore > match.homeScore
+                        Text(won ? "W" : "L")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(won ? .green : .red)
+                            .frame(width: 28, height: 28)
+                            .background(
+                                won ? Color.green.opacity(0.18) : Color.red.opacity(0.18),
+                                in: RoundedRectangle(cornerRadius: 6)
+                            )
+                    }
+                    Spacer()
+                    let last10 = recentMatches.prefix(10)
+                    let wins = last10.filter { m in
+                        m.homeTeam == team.name ? m.homeScore > m.awayScore : m.awayScore > m.homeScore
+                    }.count
+                    let total = last10.count
+                    Text("\(wins)–\(total - wins) last \(total)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+            }
+        }
+    }
+
+    private var rosterCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("ROSTER")
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .tracking(1)
+                VStack(spacing: 10) {
+                    ForEach(roster) { player in
+                        HStack(spacing: 12) {
+                            Group {
+                                if let url = player.imageURL {
+                                    AsyncImage(url: url) { phase in
+                                        switch phase {
+                                        case .success(let img): img.resizable().scaledToFill()
+                                        default: Text(String(player.name.prefix(1)))
+                                                    .font(.caption.weight(.bold)).foregroundStyle(.white)
+                                        }
+                                    }
+                                } else {
+                                    Text(String(player.name.prefix(1)))
+                                        .font(.caption.weight(.bold)).foregroundStyle(.white)
+                                }
+                            }
+                            .frame(width: 36, height: 36)
+                            .background(Color.white.opacity(0.10), in: Circle())
+                            .clipShape(Circle())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(player.name)
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(.white)
+                                if let role = player.role {
+                                    Text(role.capitalized)
+                                        .font(.caption)
+                                        .foregroundStyle(.white.opacity(0.50))
+                                }
+                            }
+                            Spacer()
+                        }
+                        if player.id != roster.last?.id {
+                            Divider().background(Color.white.opacity(0.07))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var upcomingCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("UPCOMING")
+                .font(.caption2.weight(.black))
+                .foregroundStyle(.white.opacity(0.45))
+                .tracking(1)
+                .padding(.horizontal, 2)
+            VStack(spacing: 0) {
+                ForEach(Array(upcomingMatches.enumerated()), id: \.element.id) { i, match in
+                    TeamScheduleRow(match: match, teamName: team.name)
+                    if i < upcomingMatches.count - 1 {
+                        Divider().background(Color.white.opacity(0.07)).padding(.leading, 52)
+                    }
+                }
+            }
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+            .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.09), lineWidth: 1) }
+        }
+    }
+
+    private var resultsCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("RECENT RESULTS")
+                .font(.caption2.weight(.black))
+                .foregroundStyle(.white.opacity(0.45))
+                .tracking(1)
+                .padding(.horizontal, 2)
+            VStack(spacing: 0) {
+                ForEach(Array(recentMatches.enumerated()), id: \.element.id) { i, match in
+                    TeamResultRow(match: match, teamName: team.name)
+                    if i < recentMatches.count - 1 {
+                        Divider().background(Color.white.opacity(0.07)).padding(.leading, 52)
+                    }
+                }
+            }
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+            .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.09), lineWidth: 1) }
+        }
+    }
+}
+
+private struct TeamScheduleRow: View {
+    let match: EsportsMatch
+    let teamName: String
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
+    }()
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "EEE, MMM d"; return f
+    }()
+
+    private var opponent:       String { match.homeTeam == teamName ? match.awayTeam   : match.homeTeam }
+    private var opponentLogoURL: URL?  { match.homeTeam == teamName ? match.awayLogoURL : match.homeLogoURL }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            TeamLogoBadge(team: opponent, size: 28, overrideURL: opponentLogoURL)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("vs \(opponent)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let date = match.scheduledAt {
+                    let cal  = Calendar.current
+                    let time = Self.timeFormatter.string(from: date)
+                    let day  = cal.isDateInToday(date)     ? "Today"
+                             : cal.isDateInTomorrow(date)  ? "Tomorrow"
+                             : Self.dayFormatter.string(from: date)
+                    Text("\(day) · \(time)")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.50))
+                }
+            }
+            Spacer()
+            Text(match.league)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white.opacity(0.50))
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(Color.white.opacity(0.08), in: Capsule())
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+}
+
+// MARK: - Tournament Detail View
+
+struct TournamentDetailView: View {
+    let tournament: SelectedTournamentInfo
+
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var info: TournamentInfo? = nil
+    @State private var rounds: [BracketRound] = []
+    @State private var isLoading = true
+    @State private var selectedMatch: EsportsMatch? = nil
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MMM d"; return f
+    }()
+
+    var body: some View {
+        ZStack {
+            AppBackground().ignoresSafeArea()
+            if isLoading {
+                ProgressView().tint(.white)
+            } else {
+                ScrollView {
+                    VStack(spacing: 16) {
+                        heroCard
+                        if rounds.isEmpty {
+                            emptyBracket
+                        } else {
+                            ForEach(rounds) { round in
+                                roundSection(round)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 20)
+                }
+            }
+        }
+        .navigationTitle(tournament.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }.foregroundStyle(AppTheme.accent)
+            }
+        }
+        .task { await loadData() }
+        .sheet(item: $selectedMatch) { match in
+            MatchDetailView(match: match)
+                .environmentObject(store)
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func loadData() async {
+        let service = PandaScoreService()
+        async let infoTask   = service.fetchTournamentInfo(tournamentID: tournament.id)
+        async let roundsTask = service.fetchTournamentBracket(tournamentID: tournament.id)
+        info   = try? await infoTask
+        rounds = (try? await roundsTask) ?? []
+        isLoading = false
+    }
+
+    private var heroCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(tournament.name)
+                            .font(.title3.weight(.black))
+                            .foregroundStyle(.white)
+                        Text(tournament.league)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                    Spacer()
+                    Text(tournament.league)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.white.opacity(0.12), in: Capsule())
+                }
+                if info?.beginAt != nil || info?.prizepool != nil {
+                    Divider().background(Color.white.opacity(0.08))
+                    HStack(spacing: 16) {
+                        if let begin = info?.beginAt, let end = info?.endAt {
+                            Label(
+                                "\(Self.dateFormatter.string(from: begin)) – \(Self.dateFormatter.string(from: end))",
+                                systemImage: "calendar"
+                            )
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.65))
+                        } else if let begin = info?.beginAt {
+                            Label(Self.dateFormatter.string(from: begin), systemImage: "calendar")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.65))
+                        }
+                        if let prize = info?.prizepool, !prize.isEmpty {
+                            Label(prize, systemImage: "trophy.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.accent.opacity(0.90))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func roundSection(_ round: BracketRound) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(round.name.uppercased())
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(round.isFinal ? AppTheme.accent : .white.opacity(0.50))
+                    .tracking(1)
+                if round.isFinal {
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(AppTheme.accent)
+                }
+            }
+            .padding(.horizontal, 2)
+
+            VStack(spacing: 0) {
+                ForEach(Array(round.matches.enumerated()), id: \.element.id) { i, match in
+                    Button { selectedMatch = match } label: {
+                        BracketMatchRow(match: match)
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                    if i < round.matches.count - 1 {
+                        Divider().background(Color.white.opacity(0.07)).padding(.leading, 12)
+                    }
+                }
+            }
+            .background(
+                round.isFinal
+                    ? AppTheme.accent.opacity(0.08)
+                    : Color.white.opacity(0.06),
+                in: RoundedRectangle(cornerRadius: 14)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(
+                        round.isFinal ? AppTheme.accent.opacity(0.22) : Color.white.opacity(0.09),
+                        lineWidth: 1
+                    )
+            }
+        }
+    }
+
+    private var emptyBracket: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "list.bullet.indent")
+                .font(.system(size: 36))
+                .foregroundStyle(.white.opacity(0.20))
+            Text("Bracket not yet available")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.45))
+            Text("Check back once the tournament begins.")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.30))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
+    }
+}
+
+// MARK: - Bracket Match Row
+
+private struct BracketMatchRow: View {
+    let match: EsportsMatch
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
+    }()
+
+    private var awayWon: Bool? {
+        guard match.state == .final else { return nil }
+        return match.awayScore > match.homeScore
+    }
+    private var homeWon: Bool? {
+        guard match.state == .final else { return nil }
+        return match.homeScore > match.awayScore
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 5) {
+                if match.state == .live { LivePulseDot() }
+                Text(match.state == .upcoming
+                     ? (match.scheduledAt.map { Self.timeFormatter.string(from: $0) } ?? "TBD")
+                     : match.detailLine)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(stateColor)
+                Spacer()
+                if let fmt = match.seriesFormat {
+                    Text("BO\(fmt)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.40))
+                }
+            }
+            BracketTeamRow(
+                team: match.awayTeam, score: match.awayScore,
+                logoURL: match.awayLogoURL, isWinner: awayWon,
+                isUpcoming: match.state == .upcoming
+            )
+            BracketTeamRow(
+                team: match.homeTeam, score: match.homeScore,
+                logoURL: match.homeLogoURL, isWinner: homeWon,
+                isUpcoming: match.state == .upcoming
+            )
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
+    private var stateColor: Color {
+        switch match.state {
+        case .live:     return .red
+        case .upcoming: return AppTheme.accentBlue
+        case .final:    return .white.opacity(0.55)
+        }
+    }
+}
+
+private struct BracketTeamRow: View {
+    let team: String
+    let score: Int
+    let logoURL: URL?
+    let isWinner: Bool?
+    let isUpcoming: Bool
+
+    private var nameColor: Color { isWinner == false ? .white.opacity(0.38) : .white }
+    private var scoreColor: Color {
+        switch isWinner {
+        case .some(true):  return .green
+        case .some(false): return .white.opacity(0.38)
+        case .none:        return .white
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TeamLogoBadge(team: team, size: 22, overrideURL: logoURL)
+            Text(team)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(nameColor)
+                .lineLimit(1)
+            Spacer()
+            if isUpcoming {
+                Text("–")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(.white.opacity(0.25))
+            } else {
+                Text("\(score)")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(scoreColor)
+                    .contentTransition(.numericText())
+            }
+        }
+    }
+}
+
+private struct TeamResultRow: View {
+    let match: EsportsMatch
+    let teamName: String
+
+    private var teamIsHome:      Bool   { match.homeTeam == teamName }
+    private var teamScore:       Int    { teamIsHome ? match.homeScore    : match.awayScore }
+    private var opponentScore:   Int    { teamIsHome ? match.awayScore    : match.homeScore }
+    private var won:             Bool   { teamScore > opponentScore }
+    private var opponent:        String { teamIsHome ? match.awayTeam     : match.homeTeam }
+    private var opponentLogoURL: URL?   { teamIsHome ? match.awayLogoURL  : match.homeLogoURL }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(won ? "W" : "L")
+                .font(.caption2.weight(.black))
+                .foregroundStyle(won ? .green : .red)
+                .frame(width: 22, height: 22)
+                .background(
+                    won ? Color.green.opacity(0.18) : Color.red.opacity(0.18),
+                    in: RoundedRectangle(cornerRadius: 5)
+                )
+            TeamLogoBadge(team: opponent, size: 26, overrideURL: opponentLogoURL)
+            Text(opponent)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            Spacer()
+            Text("\(teamScore)–\(opponentScore)")
+                .font(.caption.weight(.black))
+                .foregroundStyle(won ? .green : .white.opacity(0.55))
+            Text(match.league)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white.opacity(0.50))
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(Color.white.opacity(0.08), in: Capsule())
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
     }
 }

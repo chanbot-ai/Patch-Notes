@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Supabase
+import UserNotifications
 
 protocol AppDataProviding {
     func makeSeedData(referenceDate: Date) -> AppSeedData
@@ -105,6 +106,7 @@ final class AppStore: ObservableObject {
     private let feedPageSize = 20
     private var hasLoadedFollowingFeedOnce: Bool
     private var liveScorePollingTask: Task<Void, Never>?
+    private var previouslyLiveMatchIDs: Set<Int> = []
 
     init(
         dataProvider: AppDataProviding = MockAppDataProvider(),
@@ -940,12 +942,10 @@ final class AppStore: ObservableObject {
     /// Fetches only the running matches and updates their scores/games in-place,
     /// preserving all upcoming and final matches already shown on screen.
     func refreshLiveScores() async {
-        guard esportsMatches.contains(where: { $0.state == .live }) else { return }
         isRefreshingLiveScores = true
         defer { isRefreshingLiveScores = false }
 
-        guard let fresh = try? await PandaScoreService().fetchLiveMatches(),
-              !fresh.isEmpty else { return }
+        guard let fresh = try? await PandaScoreService().fetchLiveMatches() else { return }
 
         let freshByID = Dictionary(
             uniqueKeysWithValues: fresh.compactMap { m -> (Int, EsportsMatch)? in
@@ -954,11 +954,52 @@ final class AppStore: ObservableObject {
             }
         )
 
+        // Update scores for matches already in the list
+        let knownIDs = Set(esportsMatches.compactMap(\.pandaScoreMatchID))
         esportsMatches = esportsMatches.map { existing in
             guard let id = existing.pandaScoreMatchID,
                   let updated = freshByID[id] else { return existing }
             return updated
         }
+
+        // Insert any newly-live matches not yet in the list (e.g. favorited static teams)
+        let newEntries = fresh.filter { m in
+            guard let id = m.pandaScoreMatchID else { return false }
+            return !knownIDs.contains(id)
+        }
+        if !newEntries.isEmpty {
+            esportsMatches.insert(contentsOf: newEntries, at: 0)
+        }
+
+        // Notify for matches that just went live involving a favorite team
+        let newlyLiveIDs = Set(freshByID.keys).subtracting(previouslyLiveMatchIDs)
+        previouslyLiveMatchIDs = Set(freshByID.keys)
+        for id in newlyLiveIDs {
+            guard let match = freshByID[id],
+                  favoriteTeams.contains(match.homeTeam) || favoriteTeams.contains(match.awayTeam)
+            else { continue }
+            await fireLiveMatchNotification(for: match)
+        }
+    }
+
+    private func fireLiveMatchNotification(for match: EsportsMatch) async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized ||
+              settings.authorizationStatus == .provisional else { return }
+
+        let favTeam = favoriteTeams.contains(match.homeTeam) ? match.homeTeam : match.awayTeam
+        let content = UNMutableNotificationContent()
+        content.title = "\(favTeam) is live now!"
+        content.body = "\(match.awayTeam) vs \(match.homeTeam) · \(match.league)"
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "live-\(match.pandaScoreMatchID ?? 0)-\(Int(Date().timeIntervalSince1970))",
+            content: content,
+            trigger: nil
+        )
+        try? await center.add(request)
     }
 
     func startLiveScorePolling() {
