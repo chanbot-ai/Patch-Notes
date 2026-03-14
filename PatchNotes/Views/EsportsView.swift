@@ -98,6 +98,7 @@ struct EsportsView: View {
     @State private var standingsLeague = ""
     @State private var hasInitiallyLoaded = false
     @State private var selectedStateFilter: EsportsStateFilter? = nil
+    @State private var collapsedLeagues: Set<String> = []
     @State private var searchText = ""
     @State private var isSearching = false
     @FocusState private var searchFocused: Bool
@@ -885,64 +886,75 @@ struct EsportsView: View {
             }
 
             ForEach(groupedSections) { section in
+                let isCollapsed = collapsedLeagues.contains(section.league)
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(section.league)
-                            .font(.subheadline.weight(.black))
-                            .foregroundStyle(.white)
-                        Spacer()
-                        // Feature 6: standings button
-                        if !(store.leagueStandings[section.league] ?? []).isEmpty {
-                            Button {
-                                standingsLeague = section.league
-                                showStandingsSheet = true
-                            } label: {
-                                Image(systemName: "list.number")
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(AppTheme.accentBlue.opacity(0.95))
+                    Button {
+                        withAnimation(.spring(duration: 0.3)) {
+                            if isCollapsed {
+                                collapsedLeagues.remove(section.league)
+                            } else {
+                                collapsedLeagues.insert(section.league)
                             }
-                            .buttonStyle(.plain)
                         }
-                        Button {
-                            upcomingSheetLeague = section.league
-                            showUpcomingSheet = true
-                        } label: {
-                            Image(systemName: "chevron.right")
+                    } label: {
+                        HStack {
+                            Text(section.league)
+                                .font(.subheadline.weight(.black))
+                                .foregroundStyle(.white)
+                            Spacer()
+                            // Feature 6: standings button
+                            if !(store.leagueStandings[section.league] ?? []).isEmpty {
+                                Button {
+                                    standingsLeague = section.league
+                                    showStandingsSheet = true
+                                } label: {
+                                    Image(systemName: "list.number")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(AppTheme.accentBlue.opacity(0.95))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            Image(systemName: "chevron.down")
                                 .font(.caption.weight(.bold))
-                                .foregroundStyle(AppTheme.accent.opacity(0.95))
+                                .foregroundStyle(.white.opacity(0.45))
+                                .rotationEffect(.degrees(isCollapsed ? -90 : 0))
                         }
-                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            let liveMatches     = section.matches.filter { $0.state == .live }
-                            let upcomingMatches = section.matches.filter { $0.state == .upcoming }
-                            let finalMatches    = section.matches.filter { $0.state == .final }
+                    if !isCollapsed {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                let liveMatches     = section.matches.filter { $0.state == .live }
+                                let upcomingMatches = section.matches.filter { $0.state == .upcoming }
+                                let finalMatches    = section.matches.filter { $0.state == .final }
 
-                            if !liveMatches.isEmpty {
-                                MatchStateGroupLabel(title: "LIVE", color: .red, isLive: true)
-                                ForEach(liveMatches) { match in
-                                    Button { selectedMatch = match } label: { CompactMatchCard(match: match) }
-                                        .buttonStyle(PressableButtonStyle())
+                                if !liveMatches.isEmpty {
+                                    MatchStateGroupLabel(title: "LIVE", color: .red, isLive: true)
+                                    ForEach(liveMatches) { match in
+                                        Button { selectedMatch = match } label: { CompactMatchCard(match: match) }
+                                            .buttonStyle(PressableButtonStyle())
+                                    }
+                                }
+                                if !upcomingMatches.isEmpty {
+                                    MatchStateGroupLabel(title: "UPCOMING", color: AppTheme.accentBlue, isLive: false)
+                                    ForEach(upcomingMatches) { match in
+                                        Button { selectedMatch = match } label: { CompactMatchCard(match: match) }
+                                            .buttonStyle(PressableButtonStyle())
+                                    }
+                                }
+                                if !finalMatches.isEmpty {
+                                    MatchStateGroupLabel(title: "FINAL", color: .white.opacity(0.55), isLive: false)
+                                    ForEach(finalMatches) { match in
+                                        Button { selectedMatch = match } label: { CompactMatchCard(match: match) }
+                                            .buttonStyle(PressableButtonStyle())
+                                    }
                                 }
                             }
-                            if !upcomingMatches.isEmpty {
-                                MatchStateGroupLabel(title: "UPCOMING", color: AppTheme.accentBlue, isLive: false)
-                                ForEach(upcomingMatches) { match in
-                                    Button { selectedMatch = match } label: { CompactMatchCard(match: match) }
-                                        .buttonStyle(PressableButtonStyle())
-                                }
-                            }
-                            if !finalMatches.isEmpty {
-                                MatchStateGroupLabel(title: "FINAL", color: .white.opacity(0.55), isLive: false)
-                                ForEach(finalMatches) { match in
-                                    Button { selectedMatch = match } label: { CompactMatchCard(match: match) }
-                                        .buttonStyle(PressableButtonStyle())
-                                }
-                            }
+                            .padding(.vertical, 4)
                         }
-                        .padding(.vertical, 4)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
             }
