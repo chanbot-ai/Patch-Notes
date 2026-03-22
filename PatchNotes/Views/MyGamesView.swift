@@ -463,8 +463,10 @@ private struct FavoritedGameRow: View {
                     .foregroundStyle(.white.opacity(0.70))
             }
             Spacer()
-            FollowToggleButton(game: game)
-                .buttonStyle(.borderless)
+            if game.hasCommunity {
+                FollowToggleButton(game: game)
+                    .buttonStyle(.borderless)
+            }
             Image(systemName: "chevron.right")
                 .font(.caption.bold())
                 .foregroundStyle(.white.opacity(0.70))
@@ -543,77 +545,95 @@ struct GameBrowserView: View {
     }
 
     var body: some View {
-        ScrollView {
-            if isLoading {
-                VStack(spacing: 12) {
-                    ProgressView()
-                        .tint(.white)
-                        .scaleEffect(1.1)
-                    Text("Loading games…")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.70))
-                }
-                .padding(.top, 60)
-            } else if let loadError {
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.largeTitle)
-                        .foregroundStyle(.orange)
-                    Text("Failed to load games")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    Text(loadError)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                    Button {
-                        loadCatalog()
-                    } label: {
-                        Text("Retry")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 10)
-                            .background(AppTheme.accent, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.top, 40)
-                .padding(.horizontal, 16)
-            } else {
-                // Search bar
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.5))
-                    TextField("Search games", text: $searchText)
-                        .font(.subheadline)
-                        .foregroundStyle(.white)
-                        .autocorrectionDisabled()
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-
-                LazyVStack(alignment: .leading, spacing: 24) {
-                    ForEach(filteredCategories) { category in
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(category.name)
-                                .font(.headline.weight(.bold))
+        ScrollViewReader { proxy in
+            ZStack(alignment: .top) {
+                ScrollView {
+                    if isLoading {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(1.1)
+                            Text("Loading games…")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.70))
+                        }
+                        .padding(.top, 60)
+                    } else if let loadError {
+                        VStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.largeTitle)
+                                .foregroundStyle(.orange)
+                            Text("Failed to load games")
+                                .font(.headline)
                                 .foregroundStyle(.white)
+                            Text(loadError)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+                                .multilineTextAlignment(.center)
+                            Button {
+                                loadCatalog()
+                            } label: {
+                                Text("Retry")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 24)
+                                    .padding(.vertical, 10)
+                                    .background(AppTheme.accent, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.top, 40)
+                        .padding(.horizontal, 16)
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 24) {
+                            Color.clear.frame(height: 44) // spacer for floating search bar
+                                .id("browserTop")
 
-                            LazyVGrid(columns: columns, spacing: 12) {
-                                ForEach(category.games) { game in
-                                    gameTile(game)
+                            ForEach(filteredCategories) { category in
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text(category.name)
+                                        .font(.headline.weight(.bold))
+                                        .foregroundStyle(.white)
+
+                                    LazyVGrid(columns: columns, spacing: 12) {
+                                        ForEach(category.games) { game in
+                                            gameTile(game)
+                                        }
+                                    }
                                 }
                             }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 40)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 40)
+
+                // Floating translucent search bar pinned to top
+                if !isLoading && loadError == nil {
+                    VStack(spacing: 0) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.5))
+                            TextField("Search games", text: $searchText)
+                                .font(.subheadline)
+                                .foregroundStyle(.white)
+                                .autocorrectionDisabled()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                        .padding(.bottom, 6)
+
+                        Spacer()
+                    }
+                }
             }
         }
         .navigationTitle("Browse Games")

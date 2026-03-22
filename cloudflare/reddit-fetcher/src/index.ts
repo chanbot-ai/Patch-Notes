@@ -1,5 +1,5 @@
 // PatchNotes Content Pipeline — Cloudflare Worker
-// Fetches content from Reddit and Twitter (via twitterapi.io),
+// Fetches content from Reddit, Twitter (via twitterapi.io), and Steam News API,
 // rewrites it with Workers AI to feel original, preserves all media,
 // and posts to Supabase. Runs on a 5-minute cron schedule in batches.
 
@@ -7,6 +7,8 @@ interface Env {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   TWITTERAPI_IO_API_KEY: string;
+  STEAM_API_KEY: string;
+  GAMES_POPULARITY_KEY: string;
   AI: Ai;
 }
 
@@ -53,10 +55,12 @@ const MIN_SCORE = 10;
 const POSTS_PER_SUBREDDIT = 5;
 const TWEETS_PER_HANDLE = 5;
 const MIN_LIKES = 50;
-// Cloudflare free tier allows 50 subrequests per invocation.
+// Workers Paid plan allows 1,000 subrequests per invocation.
 // Each source uses ~10 requests (1 fetch + ~3 dedup + ~3 AI rewrite + ~2 insert + 1 patch).
-// 2 sources per batch stays safely under 50.
-const BATCH_SIZE = 2;
+// 15 sources per batch uses ~150 subrequests — well within the 1,000 limit.
+// With ~180 sources and 2-min cron, full cycle completes in ~24 minutes.
+const BATCH_SIZE = 15;
+const STEAM_NEWS_COUNT = 5;
 
 // -- Supabase helpers --
 
@@ -130,25 +134,29 @@ async function rewriteContent(
       ? `\n\nKNOWN GAMES (pick the closest match if the post is about one of these, or null if none match or if the post is about gaming in general):\n${gameTitles.join(", ")}`
       : "";
 
-    const prompt = `You are a gaming news editor for a social app called PatchNotes. Your job is to decide if a post is relevant to gamers, rewrite it, and identify which game it's about.
+    const prompt = `You are a gaming news editor. Rephrase the SOURCE POST below into a short news update. You MUST only use facts from the source — NEVER invent, fabricate, or add any information not present in the original title and body.
+
+CRITICAL: Your rewritten title and body must be about the SAME topic as the source. If the source is about Fortnite, your output must be about Fortnite. If about PUBG, your output must be about PUBG. Do NOT substitute a different game or topic.
 
 RULES:
-1. REJECT posts about hardware deals, tech accessories, monitors, peripherals, non-gaming merchandise, or anything not directly about video games, game studios, esports, or the gaming industry. Set "skip": true for these.
-2. Rewrite accepted posts as short, original-sounding gaming news updates. Write COMPLETE sentences — never cut off mid-sentence or use ellipsis.
-3. Keep it concise and punchy (2-4 sentences max for body).
-4. If a specific source, journalist, or insider is mentioned, credit them inline (e.g., "According to IGN..." or "Insider Tom Henderson reports...").
-5. Do not add hashtags, emojis, links, or URLs. Do not start with "RT" or reference tweets.
-6. Preserve all factual claims and key details. Do not editorialize or add opinions.
-7. Set "game" to the exact game title from the KNOWN GAMES list if the post is primarily about that game. Set null if no match or if it's general gaming news.${gameListStr}
+1. REJECT and set "skip": true if the post is NOT about a video game, gaming news, or the gaming industry. Examples of posts to REJECT:
+   - Hardware/tech deals (laptops, MacBooks, SSDs, GPUs, monitors, headsets)
+   - Merchandise, clothing, toys, collectibles
+   - General tech news unrelated to games (Apple, Amazon, phone releases)
+   - Memes with no gaming news value
+   - Job postings, giveaways, self-promotion
+   When in doubt, REJECT. We only want posts about actual video games.
+2. Rephrase the source into 1-2 complete sentences for the body. Keep the same meaning.
+3. The title should be a short headline summarizing the source title. Do NOT change the subject.
+4. Do not add hashtags, emojis, links, or URLs.
+5. Set "game" to the exact game title from the KNOWN GAMES list if the post is about one of them, or null otherwise.${gameListStr}
 
 SOURCE POST:
 TITLE: ${title}
 ${body ? `BODY: ${body.slice(0, 500)}` : ""}
 
-Respond in this exact JSON format only, no other text:
-{"skip": false, "title": "rewritten title here", "body": "rewritten body here or null if no body needed", "game": "exact game title or null"}
-Or if the post should be rejected:
-{"skip": true, "title": "", "body": null, "game": null}`;
+Respond ONLY with this JSON, no other text:
+{"skip": false, "title": "rephrased title", "body": "rephrased body or null", "game": "exact game title or null"}`;
 
     const result = await ai.run("@cf/meta/llama-3.1-8b-instruct", {
       messages: [{ role: "user", content: prompt }],
@@ -355,6 +363,111 @@ function extractTwitterMedia(
   return { mediaUrl: null, thumbnailUrl: null, isVideo: false };
 }
 
+// -- Steam helpers --
+// Steam News API is free (no key required) and returns patch notes,
+// community announcements, and news directly from game developers.
+
+interface SteamNewsItem {
+  gid: string;
+  title: string;
+  url: string;
+  is_external_url: boolean;
+  author: string;
+  contents: string;
+  feedlabel: string;
+  feedname: string;
+  feed_type: number; // 0=external, 1=Steam community
+  date: number; // Unix timestamp
+  appid: number;
+  tags?: string[];
+}
+
+function stripBBCode(text: string): string {
+  return text
+    .replace(/\[\/?\w+[^\]]*\]/g, "") // Remove BBCode tags like [b], [/b], [url=...]
+    .replace(/\{STEAM_CLAN_IMAGE\}[^\s]*/g, "") // Remove Steam clan image refs
+    .replace(/https?:\/\/\S+/g, "") // Remove raw URLs
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function fetchSteamNews(
+  appId: string,
+): Promise<SteamNewsItem[]> {
+  const url = `https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=${appId}&count=${STEAM_NEWS_COUNT * 2}&maxlength=600&format=json`;
+  const resp = await fetch(url);
+
+  if (!resp.ok) {
+    console.log(`Steam News API error for appid ${appId}: ${resp.status} ${resp.statusText}`);
+    return [];
+  }
+
+  const data = (await resp.json()) as {
+    appnews?: { newsitems?: SteamNewsItem[] };
+  };
+  const items = data?.appnews?.newsitems ?? [];
+
+  // Prefer official Steam community announcements (feed_type=1) over external aggregation
+  // Filter out very short items (spam/empty announcements)
+  return items
+    .filter((item) => {
+      const text = stripBBCode(item.contents);
+      return text.length > 50;
+    })
+    .slice(0, STEAM_NEWS_COUNT);
+}
+
+function extractSteamImage(contents: string, appId: string): string | null {
+  // Try to extract image from BBCode [img] tags
+  const imgMatch = contents.match(/\[img\](https?:\/\/[^\[]+)\[\/img\]/);
+  if (imgMatch) return imgMatch[1];
+
+  // Try Steam clan image pattern
+  const clanMatch = contents.match(/\{STEAM_CLAN_IMAGE\}(\S+)/);
+  if (clanMatch) return `https://clan.akamai.steamstatic.com/images/${clanMatch[1]}`;
+
+  // Fallback: use Steam store header image for the app
+  return `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`;
+}
+
+function buildSteamPost(
+  item: SteamNewsItem,
+  rewritten: { title: string; body: string | null },
+  botUserId: string,
+  gameId: string | null,
+): Record<string, unknown> {
+  const mediaUrl = extractSteamImage(item.contents, String(item.appid));
+  const isPatchNotes = item.tags?.includes("patchnotes") ||
+    item.feedname === "steam_community_announcements" ||
+    /patch|update|hotfix|changelog/i.test(item.title);
+
+  return {
+    author_id: botUserId,
+    game_id: gameId,
+    type: mediaUrl ? "image" : "news",
+    title: rewritten.title,
+    body: rewritten.body,
+    media_url: mediaUrl,
+    thumbnail_url: null,
+    is_system_generated: true,
+    source_kind: "curated",
+    source_provider: "steam",
+    source_external_id: `steam_${item.appid}_${item.gid}`,
+    source_handle: null,
+    source_url: item.url || null,
+    source_published_at: new Date(item.date * 1000).toISOString(),
+    source_metadata: {
+      steam_app_id: item.appid,
+      feed_type: item.feed_type,
+      feedlabel: item.feedlabel,
+      feedname: item.feedname,
+      author: item.author,
+      is_patch_notes: isPatchNotes,
+      tags: item.tags ?? [],
+    },
+  };
+}
+
 // -- Post builders --
 
 function buildRedditPost(
@@ -375,8 +488,8 @@ function buildRedditPost(
     source_kind: "curated",
     source_provider: "reddit",
     source_external_id: `reddit_${post.id}`,
-    source_handle: null,
-    source_url: null,
+    source_handle: `r/${post.subreddit}`,
+    source_url: post.permalink ? `https://reddit.com${post.permalink}` : null,
     source_published_at: post.updatedAt || new Date().toISOString(),
     source_metadata: {
       original_subreddit: post.subreddit,
@@ -438,8 +551,9 @@ async function processSource(
 ): Promise<void> {
   const isTwitter = source.source_type === "twitter";
   const isReddit = source.source_type === "reddit";
+  const isSteam = source.source_type === "steam";
 
-  if (!isReddit && !isTwitter) return;
+  if (!isReddit && !isTwitter && !isSteam) return;
 
   // Skip Twitter sources if no API key configured — update last_fetched_at
   // so they don't block the queue
@@ -500,6 +614,25 @@ async function processSource(
     }));
   }
 
+  if (isSteam) {
+    // source_identifier is the Steam app ID (e.g. "730" for CS2)
+    const newsItems = await fetchSteamNews(source.source_identifier);
+    result.postsFetched += newsItems.length;
+    if (newsItems.length > 0) {
+      console.log(
+        `Steam appid ${source.source_identifier}: ${newsItems.length} news items`,
+      );
+    }
+    items = newsItems.map((item) => ({
+      externalId: `steam_${item.appid}_${item.gid}`,
+      originalTitle: item.title,
+      originalBody: stripBBCode(item.contents).slice(0, 500) || null,
+      provider: "steam",
+      buildPost: (rewritten: { title: string; body: string | null }) =>
+        buildSteamPost(item, rewritten, source.bot_user_id, source.game_id),
+    }));
+  }
+
   for (const item of items) {
     // Check dedup
     const existing = await sbGet(
@@ -529,11 +662,13 @@ async function processSource(
 
     const appPost = item.buildPost(rewritten);
 
-    // AI game-tagging: if AI identified a game, use it (even overriding source game_id
-    // to handle cross-posted content, e.g. a Mass Effect post in r/reddeadredemption)
-    if (rewritten.game) {
+    // AI game-tagging: only use AI's game guess when the source has no game_id
+    // (e.g. posts from general subreddits like r/gaming). When a source already has
+    // a game_id from bot_content_sources, trust the subreddit mapping — the AI
+    // (Llama 3.1 8B) frequently hallucinates wrong games (e.g. tagging PUBG as Fortnite).
+    if (rewritten.game && !source.game_id) {
       const matchedGameId = gameMap.get(rewritten.game.toLowerCase());
-      if (matchedGameId && matchedGameId !== source.game_id) {
+      if (matchedGameId) {
         appPost.game_id = matchedGameId;
         console.log(`AI tagged "${rewritten.title.slice(0, 50)}" → ${rewritten.game}`);
       }
@@ -619,6 +754,545 @@ async function fetchContent(env: Env): Promise<PipelineResult> {
   return result;
 }
 
+// -- Steam catalog enrichment --
+// Fetches app details + review counts from Steam to enrich game metadata.
+// Called via POST /enrich (not on every cron tick — rate-limited by Steam).
+
+interface SteamAppDetails {
+  name: string;
+  steam_appid: number;
+  short_description: string;
+  header_image: string;
+  screenshots: Array<{ path_thumbnail: string; path_full: string }>;
+  genres: Array<{ id: string; description: string }>;
+  release_date: { coming_soon: boolean; date: string };
+  metacritic?: { score: number; url: string };
+  developers?: string[];
+  publishers?: string[];
+  categories?: Array<{ id: number; description: string }>;
+  recommendations?: { total: number };
+}
+
+interface SteamReviewSummary {
+  total_reviews: number;
+  total_positive: number;
+  total_negative: number;
+  review_score_desc: string;
+}
+
+// Minimum review count for Steam discovery to create a new game community.
+// Games added via subreddit sources bypass this — they already have community demand.
+// 10k reviews ≈ mid-tier popular game; high enough to avoid niche/indie spam,
+// low enough to catch legitimate titles that aren't AAA blockbusters.
+const PILL_REVIEW_THRESHOLD = 10_000;
+
+// Search Steam store for an app ID by game title
+async function searchSteamAppId(
+  title: string,
+): Promise<{ appid: number; name: string } | null> {
+  const url = `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(title)}&l=english&cc=US`;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as {
+      total: number;
+      items: Array<{ id: number; name: string }>;
+    };
+    if (!data.items?.length) return null;
+    // Return first result — Steam search ranks by relevance
+    return { appid: data.items[0].id, name: data.items[0].name };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchSteamAppDetails(
+  appId: number,
+): Promise<SteamAppDetails | null> {
+  const resp = await fetch(
+    `https://store.steampowered.com/api/appdetails?appids=${appId}`,
+  );
+  if (!resp.ok) return null;
+  const data = (await resp.json()) as Record<
+    string,
+    { success: boolean; data?: SteamAppDetails }
+  >;
+  const entry = data[String(appId)];
+  return entry?.success ? (entry.data ?? null) : null;
+}
+
+async function fetchSteamReviewSummary(
+  appId: number,
+): Promise<SteamReviewSummary | null> {
+  const resp = await fetch(
+    `https://store.steampowered.com/appreviews/${appId}?json=1&num_per_page=0&language=all`,
+  );
+  if (!resp.ok) return null;
+  const data = (await resp.json()) as {
+    success: number;
+    query_summary?: SteamReviewSummary;
+  };
+  return data.success === 1 ? (data.query_summary ?? null) : null;
+}
+
+async function enrichGameCatalog(
+  env: Env,
+): Promise<{
+  enriched: number;
+  skipped: number;
+  discovered: number;
+  errors: string[];
+}> {
+  const result = { enriched: 0, skipped: 0, discovered: 0, errors: [] as string[] };
+
+  // Fetch games that have steam_app_id set, prioritizing un-enriched games first
+  const games = (await sbGet(
+    env,
+    "games",
+    "steam_app_id=not.is.null&select=id,title,steam_app_id,cover_image_url,genre,release_date,enriched_at&order=enriched_at.asc.nullsfirst&limit=15",
+  )) as Array<{
+    id: string;
+    title: string;
+    steam_app_id: number;
+    cover_image_url: string | null;
+    genre: string | null;
+    release_date: string | null;
+    enriched_at: string | null;
+  }>;
+
+  console.log(`Enriching batch of ${games.length} games (oldest-enriched first)`);
+
+  for (const game of games) {
+    try {
+      const [details, reviews] = await Promise.all([
+        fetchSteamAppDetails(game.steam_app_id),
+        fetchSteamReviewSummary(game.steam_app_id),
+      ]);
+
+      if (!details) {
+        result.skipped++;
+        continue;
+      }
+
+      // Safety check: verify the Steam app name roughly matches our game title
+      // to prevent wrong cover art from mismatched steam_app_ids
+      const steamName = details.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const ourName = game.title.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const nameMatches =
+        steamName.includes(ourName.slice(0, 8)) ||
+        ourName.includes(steamName.slice(0, 8));
+
+      if (!nameMatches) {
+        console.log(
+          `WARNING: Steam app ${game.steam_app_id} name "${details.name}" does not match game "${game.title}" — skipping cover art update`,
+        );
+      }
+
+      // Build update payload — only set fields that add value
+      const updates: Record<string, unknown> = {};
+
+      // Use Steam's portrait library capsule (600x900) as primary cover art.
+      // Store the API's header_image (with unique hash) as fallback for games
+      // where the portrait capsule doesn't exist on Steam's CDN.
+      if (nameMatches) {
+        const portraitUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${game.steam_app_id}/library_600x900.jpg`;
+        updates.cover_image_url = portraitUrl;
+        if (details.header_image) {
+          updates.cover_image_fallback_url = details.header_image;
+        }
+      }
+
+      // Enrich genre if missing
+      if (!game.genre && details.genres?.length) {
+        updates.genre = details.genres[0].description;
+      }
+
+      // Enrich release date if missing and Steam has one
+      if (!game.release_date && details.release_date?.date) {
+        const parsed = parseSteamDate(details.release_date.date);
+        if (parsed) updates.release_date = parsed;
+      }
+
+      // Always update steam_review_count and steam_review_score for popularity gating
+      if (reviews) {
+        updates.steam_review_count = reviews.total_reviews;
+        updates.steam_review_score = reviews.review_score_desc;
+        // Auto-promote to community when a game crosses the review threshold
+        if (reviews.total_reviews >= PILL_REVIEW_THRESHOLD) {
+          updates.has_community = true;
+        }
+      }
+
+      if (details.metacritic?.score) {
+        updates.metacritic_score = details.metacritic.score;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        updates.enriched_at = new Date().toISOString();
+        await sbPatch(env, "games", `id=eq.${game.id}`, updates);
+        result.enriched++;
+        console.log(
+          `Enriched "${game.title}": ${Object.keys(updates).join(", ")}`,
+        );
+      } else {
+        result.skipped++;
+      }
+    } catch (err) {
+      const msg = `${game.title}: ${(err as Error).message}`;
+      console.log(`Enrich error: ${msg}`);
+      result.errors.push(msg);
+    }
+  }
+
+  return result;
+}
+
+// -- Steam game discovery --
+// Separate endpoint so it doesn't compete with enrichment for the 50 subrequest limit.
+// Pulls upcoming/new/popular games from Steam featured categories and adds them to the catalog.
+
+async function discoverGames(
+  env: Env,
+): Promise<{ discovered: number; linked: number; skipped: number; errors: string[] }> {
+  const result = { discovered: 0, linked: 0, skipped: 0, errors: [] as string[] };
+
+  // Load all existing games to avoid duplicates by app ID or title
+  const existingGames = (await sbGet(
+    env,
+    "games",
+    "select=id,title,steam_app_id",
+  )) as Array<{ id: string; title: string; steam_app_id: number | null }>;
+  const existingAppIds = new Set(
+    existingGames.filter((g) => g.steam_app_id).map((g) => g.steam_app_id!),
+  );
+  const existingTitles = new Map(
+    existingGames.map((g) => [g.title.toLowerCase(), g.id]),
+  );
+  console.log(`${existingGames.length} games in catalog (${existingAppIds.size} with steam IDs)`);
+
+  // Phase 1: Link existing catalog games that are missing steam_app_id.
+  // Use Steam's store search API to find app IDs, then fetch details for release dates.
+  const unlinkedGames = existingGames.filter((g) => !g.steam_app_id);
+  let subrequestsUsed = 1; // 1 for the games query above
+  const MAX_SUBREQUESTS = 900; // Workers Paid allows 1,000; leave headroom
+
+  for (const game of unlinkedGames) {
+    if (subrequestsUsed + 2 > MAX_SUBREQUESTS) {
+      console.log(`Stopping link phase at subrequest limit (${subrequestsUsed} used)`);
+      break;
+    }
+
+    try {
+      const searchResult = await searchSteamAppId(game.title);
+      subrequestsUsed++;
+      if (!searchResult) {
+        console.log(`No Steam match for "${game.title}"`);
+        continue;
+      }
+
+      // Verify the search result matches and isn't already in our catalog
+      if (existingAppIds.has(searchResult.appid)) continue;
+
+      // Fetch full details for release date and metadata
+      const details = await fetchSteamAppDetails(searchResult.appid);
+      subrequestsUsed++;
+      if (!details) continue;
+
+      // Fuzzy name check — ensure it's actually the right game
+      const searchName = details.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const catalogName = game.title.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (!searchName.includes(catalogName) && !catalogName.includes(searchName)) {
+        console.log(`Name mismatch: "${game.title}" vs Steam "${details.name}" — skipping`);
+        continue;
+      }
+
+      const releaseDate = details.release_date?.date
+        ? parseSteamDate(details.release_date.date)
+        : null;
+      const coverUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${searchResult.appid}/library_600x900.jpg`;
+
+      await sbPatch(env, "games", `id=eq.${game.id}`, {
+        steam_app_id: searchResult.appid,
+        cover_image_url: coverUrl,
+        cover_image_fallback_url: details.header_image ?? null,
+        genre: details.genres?.[0]?.description ?? null,
+        ...(releaseDate ? { release_date: releaseDate } : {}),
+        metacritic_score: details.metacritic?.score ?? null,
+        enriched_at: new Date().toISOString(),
+      });
+      subrequestsUsed++;
+      existingAppIds.add(searchResult.appid);
+      result.linked++;
+      console.log(
+        `Linked "${game.title}" → Steam "${details.name}" (appid ${searchResult.appid}, release: ${releaseDate ?? "TBD"})`,
+      );
+    } catch (err) {
+      result.errors.push(`link ${game.title}: ${(err as Error).message}`);
+    }
+  }
+
+  // Phase 2: Discover new games from Steam featured categories if we have subrequests left
+  if (subrequestsUsed + 2 > MAX_SUBREQUESTS) {
+    console.log(`No subrequests left for featured discovery (${subrequestsUsed} used)`);
+    return result;
+  }
+
+  const featResp = await fetch(
+    "https://store.steampowered.com/api/featuredcategories/",
+  );
+  subrequestsUsed++;
+  if (!featResp.ok) {
+    result.errors.push(`featured categories: ${featResp.status}`);
+    return result;
+  }
+
+  const featData = (await featResp.json()) as Record<
+    string,
+    { name?: string; items?: Array<{ id: number; name: string }> }
+  >;
+
+  // Collect unique candidate app IDs across all categories
+  const candidates: Array<{ id: number; name: string; category: string }> = [];
+  for (const category of ["coming_soon", "top_sellers", "new_releases"]) {
+    const items = featData[category]?.items ?? [];
+    for (const item of items) {
+      if (existingAppIds.has(item.id)) continue;
+      if (candidates.some((c) => c.id === item.id)) continue;
+      candidates.push({ id: item.id, name: item.name, category });
+    }
+  }
+
+  console.log(`${candidates.length} new candidates from Steam featured`);
+
+  for (const candidate of candidates) {
+    if (subrequestsUsed + 2 > MAX_SUBREQUESTS) {
+      console.log(`Stopping discovery at subrequest limit (${subrequestsUsed} used)`);
+      break;
+    }
+
+    try {
+      // Fetch review count for popularity signal
+      const reviews = await fetchSteamReviewSummary(candidate.id);
+      subrequestsUsed++;
+      const reviewCount = reviews?.total_reviews ?? 0;
+
+      // All games go into the catalog (browsable, favoritable).
+      // Only games above the review threshold get has_community = true (followable, bot-worthy).
+      const hasCommunity = reviewCount >= PILL_REVIEW_THRESHOLD;
+
+      // Fetch full details
+      const details = await fetchSteamAppDetails(candidate.id);
+      subrequestsUsed++;
+      if (!details) {
+        result.skipped++;
+        continue;
+      }
+
+      const releaseDate = details.release_date?.date
+        ? parseSteamDate(details.release_date.date)
+        : null;
+
+      // Use portrait library capsule for cover art
+      const coverUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${candidate.id}/library_600x900.jpg`;
+
+      // Check if a game with this title already exists (without steam_app_id)
+      const existingId = existingTitles.get(details.name.toLowerCase());
+      if (existingId) {
+        // Update the existing game rather than creating a duplicate
+        await sbPatch(env, "games", `id=eq.${existingId}`, {
+          steam_app_id: candidate.id,
+          cover_image_url: coverUrl,
+          cover_image_fallback_url: details.header_image ?? null,
+          genre: details.genres?.[0]?.description ?? null,
+          release_date: releaseDate ?? undefined,
+          steam_review_count: reviewCount,
+          steam_review_score: reviews?.review_score_desc ?? null,
+          metacritic_score: details.metacritic?.score ?? null,
+          has_community: hasCommunity,
+          enriched_at: new Date().toISOString(),
+        });
+        console.log(
+          `Linked existing "${details.name}" to Steam appid ${candidate.id} (community: ${hasCommunity})`,
+        );
+      } else {
+        await sbInsert(env, "games", {
+          title: details.name,
+          steam_app_id: candidate.id,
+          cover_image_url: coverUrl,
+          cover_image_fallback_url: details.header_image ?? null,
+          genre: details.genres?.[0]?.description ?? null,
+          release_date: releaseDate,
+          category: "PC",
+          steam_review_count: reviewCount,
+          steam_review_score: reviews?.review_score_desc ?? null,
+          metacritic_score: details.metacritic?.score ?? null,
+          has_community: hasCommunity,
+          enriched_at: new Date().toISOString(),
+        });
+      }
+      subrequestsUsed++;
+      existingAppIds.add(candidate.id);
+      result.discovered++;
+      console.log(
+        `Discovered "${details.name}" (${reviewCount} reviews, community: ${hasCommunity}, ${candidate.category})`,
+      );
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (!msg.includes("409") && !msg.includes("23505")) {
+        result.errors.push(`discover ${candidate.name}: ${msg}`);
+      }
+    }
+  }
+
+  return result;
+}
+
+function parseSteamDate(dateStr: string): string | null {
+  // Steam dates come in formats like "Feb 24, 2022" or "Q1 2026" or "Coming Soon"
+  // Try to parse common formats into YYYY-MM-DD
+  const match = dateStr.match(
+    /(\w+)\s+(\d{1,2}),?\s+(\d{4})/,
+  );
+  if (match) {
+    const months: Record<string, string> = {
+      Jan: "01", Feb: "02", Mar: "03", Apr: "04",
+      May: "05", Jun: "06", Jul: "07", Aug: "08",
+      Sep: "09", Oct: "10", Nov: "11", Dec: "12",
+    };
+    const m = months[match[1]];
+    if (m) {
+      return `${match[3]}-${m}-${match[2].padStart(2, "0")}`;
+    }
+  }
+  return null;
+}
+
+// -- Hype signal sync (games-popularity.com) --
+// Uses Steam wishlist rankings as a hype signal for unreleased games.
+// Top 50 wishlisted games get has_community = true automatically.
+// Also discovers new games from the wishlist/seller lists and adds them to the catalog.
+
+const WISHLIST_COMMUNITY_THRESHOLD = 50; // top N wishlisted → community
+
+interface PopularityEntry {
+  position: number;
+  gameName: string;
+  steamId: string;
+}
+
+interface PopularityResponse {
+  validTimeUtc: string;
+  data: PopularityEntry[];
+}
+
+async function syncHypeSignals(
+  env: Env,
+): Promise<{ promoted: number; discovered: number; errors: string[] }> {
+  const result = { promoted: 0, discovered: 0, errors: [] as string[] };
+  const apiKey = env.GAMES_POPULARITY_KEY;
+  const base = "https://games-popularity.com/swagger/api";
+
+  // Fetch top wishlisted games
+  let wishlistEntries: PopularityEntry[] = [];
+  try {
+    const resp = await fetch(`${base}/top-wishlist?apiKey=${apiKey}`);
+    if (!resp.ok) {
+      result.errors.push(`top-wishlist: ${resp.status}`);
+      return result;
+    }
+    const body = (await resp.json()) as PopularityResponse;
+    // Deduplicate (API returns duplicates)
+    const seen = new Set<string>();
+    for (const entry of body.data) {
+      if (!seen.has(entry.steamId)) {
+        seen.add(entry.steamId);
+        wishlistEntries.push(entry);
+      }
+    }
+  } catch (err) {
+    result.errors.push(`top-wishlist: ${(err as Error).message}`);
+    return result;
+  }
+
+  console.log(`${wishlistEntries.length} unique wishlisted games from API`);
+
+  // Load existing games for dedup
+  const existingGames = (await sbGet(
+    env,
+    "games",
+    "select=id,title,steam_app_id,has_community",
+  )) as Array<{ id: string; title: string; steam_app_id: number | null; has_community: boolean }>;
+  const byAppId = new Map(
+    existingGames.filter((g) => g.steam_app_id).map((g) => [g.steam_app_id!, g]),
+  );
+  const byTitle = new Map(
+    existingGames.map((g) => [g.title.toLowerCase(), g]),
+  );
+
+  // Process top wishlisted games
+  for (const entry of wishlistEntries) {
+    const appId = parseInt(entry.steamId, 10);
+    if (isNaN(appId)) continue;
+
+    const shouldBeCommunity = entry.position <= WISHLIST_COMMUNITY_THRESHOLD;
+    const existing = byAppId.get(appId) ?? byTitle.get(entry.gameName.toLowerCase());
+
+    if (existing) {
+      // Game exists — promote to community if in top N and not already
+      if (shouldBeCommunity && !existing.has_community) {
+        try {
+          await sbPatch(env, "games", `id=eq.${existing.id}`, {
+            has_community: true,
+          });
+          result.promoted++;
+          console.log(
+            `Promoted "${entry.gameName}" to community (wishlist #${entry.position})`,
+          );
+        } catch (err) {
+          result.errors.push(`promote ${entry.gameName}: ${(err as Error).message}`);
+        }
+      }
+    } else {
+      // New game — add to catalog. Only top 200 wishlisted are worth adding
+      // to keep catalog manageable.
+      if (entry.position > 200) continue;
+
+      try {
+        // Fetch Steam details for release date, genre, etc.
+        const details = await fetchSteamAppDetails(appId);
+        const releaseDate = details?.release_date?.date
+          ? parseSteamDate(details.release_date.date)
+          : null;
+        const coverUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`;
+
+        await sbInsert(env, "games", {
+          title: details?.name ?? entry.gameName,
+          steam_app_id: appId,
+          cover_image_url: coverUrl,
+          cover_image_fallback_url: details?.header_image ?? null,
+          genre: details?.genres?.[0]?.description ?? null,
+          release_date: releaseDate,
+          category: "PC",
+          has_community: shouldBeCommunity,
+          enriched_at: new Date().toISOString(),
+        });
+        byAppId.set(appId, { id: "", title: entry.gameName, steam_app_id: appId, has_community: shouldBeCommunity });
+        result.discovered++;
+        console.log(
+          `Discovered "${entry.gameName}" from wishlist #${entry.position} (community: ${shouldBeCommunity})`,
+        );
+      } catch (err) {
+        const msg = (err as Error).message;
+        if (!msg.includes("409") && !msg.includes("23505")) {
+          result.errors.push(`discover ${entry.gameName}: ${msg}`);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 // -- Worker entry points --
 
 export default {
@@ -632,6 +1306,33 @@ export default {
       });
     }
 
+    const url = new URL(request.url);
+
+    // POST /enrich — run Steam catalog enrichment (metadata, cover art, reviews)
+    if (url.pathname === "/enrich") {
+      const result = await enrichGameCatalog(env);
+      return new Response(JSON.stringify(result, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // POST /discover — find new games from Steam featured categories
+    if (url.pathname === "/discover") {
+      const result = await discoverGames(env);
+      return new Response(JSON.stringify(result, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // POST /hype — use games-popularity.com wishlist rankings to promote upcoming games
+    if (url.pathname === "/hype") {
+      const result = await syncHypeSignals(env);
+      return new Response(JSON.stringify(result, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // Default: run content pipeline
     const result = await fetchContent(env);
     return new Response(JSON.stringify(result, null, 2), {
       headers: { "Content-Type": "application/json" },

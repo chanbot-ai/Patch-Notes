@@ -136,7 +136,7 @@ private final class RemoteImageCache: @unchecked Sendable {
 struct RemoteMediaImage: View {
     let primaryURL: URL?
     let alternatePrimaryURLs: [URL]
-    let fallbackURL: URL
+    let fallbackURL: URL?
     let contentMode: ContentMode
 
     @State private var loadedImage: UIImage?
@@ -144,7 +144,7 @@ struct RemoteMediaImage: View {
 
     init(
         primaryURL: URL?,
-        fallbackURL: URL,
+        fallbackURL: URL? = nil,
         alternatePrimaryURLs: [URL] = [],
         contentMode: ContentMode = .fill
     ) {
@@ -160,7 +160,7 @@ struct RemoteMediaImage: View {
         for url in alternatePrimaryURLs where !urls.contains(url) {
             urls.append(url)
         }
-        urls.append(fallbackURL)
+        if let fallbackURL { urls.append(fallbackURL) }
         return urls
     }
 
@@ -218,13 +218,36 @@ struct RemoteMediaImage: View {
         }
     }
 
+    /// True when the loaded image is significantly wider than tall (e.g. Steam header banners)
+    private var isLandscapeImage: Bool {
+        guard let img = loadedImage else { return false }
+        return img.size.width > img.size.height * 1.4
+    }
+
     @ViewBuilder
     private func resolvedImage(_ image: Image) -> some View {
         switch contentMode {
         case .fill:
-            image
-                .resizable()
-                .scaledToFill()
+            if isLandscapeImage {
+                // Wide images (like Steam header banners) in portrait frames:
+                // fit the image so the full art is visible, with a subtle
+                // background gradient filling the letterbox areas.
+                ZStack {
+                    // Blurred stretched version as background
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .blur(radius: 20)
+                        .opacity(0.5)
+                    image
+                        .resizable()
+                        .scaledToFit()
+                }
+            } else {
+                image
+                    .resizable()
+                    .scaledToFill()
+            }
         case .fit:
             image
                 .resizable()
