@@ -1,15 +1,26 @@
 import SwiftUI
 
+private struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct ReleaseCalendarView: View {
     @EnvironmentObject private var store: AppStore
 
     @State private var monthOffset = 0
-    @State private var selectedDay: Date?
 
     private let calendar = Calendar.current
 
     private var anchorMonth: Date {
         calendar.date(from: calendar.dateComponents([.year, .month], from: Date())) ?? Date()
+    }
+
+    private var minMonthOffset: Int {
+        let currentMonth = calendar.component(.month, from: Date())
+        return -(currentMonth - 1)
     }
 
     private var selectedMonth: Date {
@@ -20,633 +31,340 @@ struct ReleaseCalendarView: View {
         store.releases(forMonthContaining: selectedMonth)
     }
 
-    private var monthHighlights: [Game] {
-        releasesForMonth
-            .sorted { lhs, rhs in
-                let lhsFollowing = store.isFollowingGame(lhs)
-                let rhsFollowing = store.isFollowingGame(rhs)
-                if lhsFollowing != rhsFollowing { return lhsFollowing && !rhsFollowing }
-
-                let lhsFavorite = store.isFavorite(lhs)
-                let rhsFavorite = store.isFavorite(rhs)
-                if lhsFavorite != rhsFavorite { return lhsFavorite && !rhsFavorite }
-
-                if lhs.releaseDate != rhs.releaseDate { return lhs.releaseDate < rhs.releaseDate }
-                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-            }
-    }
-
-    private var weekdaySymbols: [String] {
-        let symbols = calendar.veryShortStandaloneWeekdaySymbols
-        let shift = max(0, calendar.firstWeekday - 1)
-        return Array(symbols[shift...]) + Array(symbols[..<shift])
-    }
-
-    private var monthDays: [Date] {
-        guard let monthRange = calendar.range(of: .day, in: .month, for: selectedMonth) else { return [] }
-        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: selectedMonth)) ?? selectedMonth
-
-        return monthRange.compactMap { day in
-            calendar.date(byAdding: .day, value: day - 1, to: monthStart)
-        }
-    }
-
-    private var leadingPaddingCount: Int {
-        guard let firstDay = monthDays.first else { return 0 }
-        let firstWeekday = calendar.component(.weekday, from: firstDay)
-        return (firstWeekday - calendar.firstWeekday + 7) % 7
-    }
-
-    private var releasesByDay: [Date: [Game]] {
-        Dictionary(grouping: releasesForMonth) { game in
+    /// Releases grouped by day, sorted chronologically
+    private var releasesByDay: [(date: Date, games: [Game])] {
+        let grouped = Dictionary(grouping: releasesForMonth) { game in
             calendar.startOfDay(for: game.releaseDate)
         }
+        return grouped.sorted { $0.key < $1.key }.map { (date: $0.key, games: $0.value) }
     }
 
-    private var selectedDayReleases: [Game] {
-        guard let selectedDay else { return [] }
-        return store.releases(onDay: selectedDay)
-    }
-
-    private var selectedDayTitle: String {
-        guard let selectedDay else {
-            return selectedMonth.formatted(.dateTime.month(.wide).year())
-        }
-        return selectedDay.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
-    }
+    @State private var scrollOffset: CGFloat = 0
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                monthPager
-                monthHighlightsBoard
-                monthCalendar
-                monthReleaseList
+        ScrollViewReader { proxy in
+            ZStack(alignment: .top) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        monthPager
+                            .id("calendarTop")
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: ScrollOffsetKey.self,
+                                        value: geo.frame(in: .named("calendarScroll")).minY
+                                    )
+                                }
+                            )
 
-                SectionHeader(
-                    title: selectedDayTitle,
-                    subtitle: "Tap any date to drill into full release details."
-                )
-
-                if selectedDayReleases.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(selectedDayReleases) { game in
-                        ReleaseCard(game: game)
+                        timelineView
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 24)
+                }
+                .coordinateSpace(name: "calendarScroll")
+                .onPreferenceChange(ScrollOffsetKey.self) { value in
+                    scrollOffset = value
+                }
+
+                // Floating "Top" button — visible once user scrolls down past ~120pt
+                if scrollOffset < -120 {
+                    VStack {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo("calendarTop", anchor: .top)
+                            }
+                        } label: {
+                            Text("Top")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 7)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .overlay {
+                                    Capsule()
+                                        .stroke(Color.white.opacity(0.20), lineWidth: 0.5)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 4)
+
+                        Spacer()
+                    }
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.2), value: scrollOffset < -120)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 24)
         }
         .navigationTitle("Release Calendar")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            updateSelectedDay()
-        }
-        .onChange(of: monthOffset) { _, _ in
-            updateSelectedDay()
-        }
     }
 
+    // MARK: - Month Pager
+
     private var monthPager: some View {
-        GlassCard {
-            HStack {
-                VStack(spacing: 6) {
-                    Button {
-                        monthOffset = max(monthOffset - 1, 0)
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.headline.bold())
-                            .frame(width: 34, height: 34)
-                            .background(Color.white.opacity(0.12), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(monthOffset > 0 ? 1.0 : 0.35))
-                    .disabled(monthOffset == 0)
-                    .accessibilityLabel("Previous month")
-
-                    Text("Previous")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.62))
+        HStack {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    monthOffset = max(monthOffset - 1, minMonthOffset)
                 }
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.headline.bold())
+                    .frame(width: 34, height: 34)
+                    .background(Color.white.opacity(0.12), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white.opacity(monthOffset > minMonthOffset ? 1.0 : 0.35))
+            .disabled(monthOffset == minMonthOffset)
 
-                Spacer()
+            Spacer()
 
-                VStack(spacing: 8) {
-                    Text(selectedMonth.formatted(.dateTime.month(.wide).year()))
-                        .font(.headline.weight(.bold))
-                        .fontDesign(.rounded)
-                        .foregroundStyle(.white)
+            VStack(spacing: 6) {
+                Text(selectedMonth.formatted(.dateTime.month(.wide).year()))
+                    .font(.title3.weight(.black))
+                    .fontDesign(.rounded)
+                    .foregroundStyle(.white)
 
+                Text("\(releasesForMonth.count) release\(releasesForMonth.count == 1 ? "" : "s")")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+
+                if monthOffset != 0 {
                     Button {
-                        jumpToToday()
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            monthOffset = 0
+                        }
                     } label: {
                         Text("Today")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(AppTheme.accent.opacity(0.80), in: Capsule())
+                            .padding(.vertical, 5)
+                            .background(AppTheme.accent.opacity(0.35), in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(AppTheme.accent.opacity(0.6), lineWidth: 0.5)
+                            }
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Jump to current month")
+                }
+            }
+
+            Spacer()
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    monthOffset = min(monthOffset + 1, 11)
+                }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.headline.bold())
+                    .frame(width: 34, height: 34)
+                    .background(Color.white.opacity(0.12), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white.opacity(monthOffset < 11 ? 1.0 : 0.35))
+            .disabled(monthOffset == 11)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
+    }
+
+    // MARK: - Horizontal Timeline
+
+    private var timelineView: some View {
+        Group {
+            if releasesByDay.isEmpty {
+                emptyMonthView
+            } else {
+                VStack(alignment: .leading, spacing: 20) {
+                    ForEach(releasesByDay, id: \.date) { dayGroup in
+                        daySection(date: dayGroup.date, games: dayGroup.games)
+                    }
+                }
+            }
+        }
+    }
+
+    private func daySection(date: Date, games: [Game]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Day header
+            HStack(spacing: 8) {
+                Text(date.formatted(.dateTime.day()))
+                    .font(.title.weight(.black))
+                    .fontDesign(.rounded)
+                    .foregroundStyle(.white)
+                Text(date.formatted(.dateTime.month(.abbreviated).weekday(.abbreviated)))
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.50))
+                    .textCase(.uppercase)
+
+                if calendar.isDateInToday(date) {
+                    Text("TODAY")
+                        .font(.caption2.weight(.black))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(AppTheme.accent, in: Capsule())
                 }
 
                 Spacer()
-
-                VStack(spacing: 6) {
-                    Button {
-                        monthOffset = min(monthOffset + 1, 11)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.headline.bold())
-                            .frame(width: 34, height: 34)
-                            .background(Color.white.opacity(0.12), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(monthOffset < 11 ? 1.0 : 0.35))
-                    .disabled(monthOffset == 11)
-                    .accessibilityLabel("Next month")
-
-                    Text("Next")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.62))
-                }
-            }
-        }
-    }
-
-    private var monthCalendar: some View {
-        VStack(spacing: 10) {
-            HStack {
-                ForEach(weekdaySymbols, id: \.self) { symbol in
-                    Text(symbol.uppercased())
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.56))
-                        .frame(maxWidth: .infinity)
-                }
             }
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 7), spacing: 4) {
-                ForEach(0..<leadingPaddingCount, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.clear)
-                        .frame(height: 56)
-                }
-
-                ForEach(monthDays, id: \.self) { day in
-                    let dayKey = calendar.startOfDay(for: day)
-                    CalendarDayCell(
-                        day: day,
-                        games: releasesByDay[dayKey] ?? [],
-                        isToday: calendar.isDateInToday(day),
-                        isSelected: selectedDay.map { calendar.isDate($0, inSameDayAs: day) } ?? false
-                    ) {
-                        selectedDay = day
-                    }
-                }
-            }
-        }
-        .padding(10)
-        .background(
-            LinearGradient(
-                colors: [AppTheme.surfaceTop.opacity(0.96), AppTheme.surfaceBottom.opacity(0.98)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.11), lineWidth: 1)
-        }
-    }
-
-    private var monthHighlightsBoard: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Games This Month")
-                            .font(.headline.weight(.bold))
-                            .foregroundStyle(.white)
-                        Text(highlightSubtitleText)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.68))
-                    }
-
-                    Spacer()
-
-                    if !releasesForMonth.isEmpty {
-                        Text("\(releasesForMonth.count)")
-                            .font(.caption.weight(.black))
-                            .foregroundStyle(.white.opacity(0.95))
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(Color.white.opacity(0.10), in: Capsule())
-                            .accessibilityLabel("\(releasesForMonth.count) releases this month")
-                    }
-                }
-
-                if monthHighlights.isEmpty {
-                    Text("No launches in this month. Jump ahead or back to scout the next release wave.")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.72))
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(monthHighlights.prefix(8)) { game in
-                                MonthReleaseSpotlightCard(
-                                    game: game,
-                                    isFollowing: store.isFollowingGame(game),
-                                    isFavorite: store.isFavorite(game),
-                                    socialPostCount: socialPostCount(for: game)
-                                )
-                            }
+            // Horizontal cover art strip
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(games) { game in
+                        NavigationLink {
+                            GameReleaseDetailView(game: game)
+                        } label: {
+                            TimelineCoverCard(game: game)
                         }
-                        .padding(.vertical, 2)
-                    }
-
-                    if monthHighlights.count > 8 {
-                        Text("Showing top 8 releases first (followed/favorited titles prioritized).")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.56))
+                        .buttonStyle(.plain)
                     }
                 }
+                .padding(.vertical, 2)
             }
         }
     }
 
-    private var monthReleaseList: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Month Agenda")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(.white)
-
-                if releasesForMonth.isEmpty {
-                    Text("No launches in this month.")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.72))
-                } else {
-                    ForEach(releasesForMonth) { game in
-                        HStack(alignment: .top, spacing: 8) {
-                            Text(game.releaseDate.formatted(.dateTime.day().month(.abbreviated)))
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(AppTheme.accentBlue)
-                                .frame(width: 62, alignment: .leading)
-                            Text(game.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.92))
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer()
-                        }
-                    }
-                }
-            }
+    private var emptyMonthView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.system(size: 40))
+                .foregroundStyle(.white.opacity(0.25))
+            Text("No releases this month")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.white.opacity(0.50))
+            Text("Try navigating to a different month.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.35))
         }
-    }
-
-    private var emptyState: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("No launches on this day")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(.white)
-                Text("Pick another date in the month grid or browse the month release agenda above.")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.75))
-            }
-        }
-    }
-
-    private func updateSelectedDay() {
-        if let firstRelease = releasesForMonth.first {
-            selectedDay = firstRelease.releaseDate
-            return
-        }
-        selectedDay = monthDays.first
-    }
-
-    private func jumpToToday() {
-        monthOffset = 0
-        selectedDay = Date()
-    }
-
-    private var highlightSubtitleText: String {
-        guard !releasesForMonth.isEmpty else {
-            return "No scheduled launches in this window."
-        }
-
-        let followedCount = releasesForMonth.filter { store.isFollowingGame($0) }.count
-        let favoriteCount = releasesForMonth.filter { store.isFavorite($0) }.count
-        if followedCount > 0 || favoriteCount > 0 {
-            return "\(followedCount) followed · \(favoriteCount) favorited"
-        }
-        return "Tap a card to open details or follow for the social feed."
-    }
-
-    private func socialPostCount(for game: Game) -> Int {
-        var seen = Set<UUID>()
-        for post in store.posts where post.gameID == game.id {
-            seen.insert(post.id)
-        }
-        for post in store.followingPosts where post.gameID == game.id {
-            seen.insert(post.id)
-        }
-        return seen.count
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 60)
     }
 }
 
-private struct CalendarDayCell: View {
-    let day: Date
-    let games: [Game]
-    let isToday: Bool
-    let isSelected: Bool
-    let action: () -> Void
+// MARK: - Timeline Cover Card
 
-    private var firstGameTitle: String? {
-        games.first?.title
-    }
-
-    private var shouldBoostLongTitleFont: Bool {
-        guard let firstGameTitle else { return false }
-        return firstGameTitle.count > 14
-    }
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .center) {
-                    Text(day.formatted(.dateTime.day()))
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white.opacity(isSelected ? 1.0 : 0.84))
-                    Spacer()
-                    if isToday {
-                        Circle()
-                            .fill(AppTheme.accent)
-                            .frame(width: 5, height: 5)
-                    }
-                }
-
-                Spacer(minLength: 0)
-
-                if let firstGame = games.first {
-                    Text(firstGame.title)
-                        .font(
-                            .system(
-                                size: shouldBoostLongTitleFont ? 10.2 : 9.0,
-                                weight: .bold,
-                                design: .rounded
-                            )
-                        )
-                        .foregroundStyle(.white.opacity(0.94))
-                        .lineLimit(2)
-                        .minimumScaleFactor(shouldBoostLongTitleFont ? 0.74 : 0.88)
-                        .lineSpacing(0)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 56, maxHeight: 56, alignment: .topLeading)
-            .padding(5)
-            .background(
-                LinearGradient(
-                    colors: isSelected
-                    ? [AppTheme.accent.opacity(0.32), AppTheme.surfaceBottom.opacity(0.98)]
-                    : [Color.white.opacity(0.08), Color.white.opacity(0.03)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(
-                        isSelected ? AppTheme.accent.opacity(0.70) : Color.white.opacity(0.10),
-                        lineWidth: 1
-                    )
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(day.formatted(.dateTime.month(.wide).day())): \(games.isEmpty ? "No releases" : games.map(\.title).joined(separator: ", "))")
-    }
-}
-
-private struct ReleaseCard: View {
+private struct TimelineCoverCard: View {
     @EnvironmentObject private var store: AppStore
     let game: Game
 
-    var body: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 10) {
-                    RemoteMediaImage(primaryURL: game.coverImageURL, fallbackURL: MediaFallback.gameCover)
-                        .frame(width: 62, height: 84)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(Color.white.opacity(0.18), lineWidth: 1)
-                        }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(game.title)
-                            .font(.headline.weight(.bold))
-                            .fontDesign(.rounded)
-                            .foregroundStyle(.white)
-                        Text("\(game.publisher) · \(game.genre)")
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.70))
-                    }
-                    Spacer()
-                    Text(game.releaseDate.formatted(date: .abbreviated, time: .omitted))
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.78))
-                }
-
-                HStack {
-                    NavigationLink {
-                        GameReleaseDetailView(game: game)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("View Details")
-                            Image(systemName: "arrow.right.circle.fill")
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
-                    }
-
-                    Spacer()
-
-                    Button {
-                        store.toggleFollowedGame(game)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: store.isFollowingGame(game) ? "dot.radiowaves.left.and.right" : "plus.circle")
-                            Text(store.isFollowingGame(game) ? "Following" : "Follow")
-                        }
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.92))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(
-                            store.isFollowingGame(game) ? AppTheme.accent.opacity(0.20) : Color.white.opacity(0.09),
-                            in: Capsule()
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(store.isFollowingGame(game) ? "Unfollow game" : "Follow game")
-
-                    Button {
-                        store.toggleFavorite(game)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: store.isFavorite(game) ? "star.fill" : "star")
-                            Text(store.isFavorite(game) ? "Favorited" : "Favorite")
-                        }
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.92))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(Color.white.opacity(0.12), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(store.isFavorite(game) ? "Remove favorite" : "Favorite game")
-                }
-            }
+    /// Fallback URLs: DB-stored header_image (with unique hash), then constructed patterns
+    private var coverFallbackURLs: [URL] {
+        var urls: [URL] = []
+        // First priority: DB-stored fallback (Steam API's header_image with correct hash)
+        if let fallback = game.coverImageFallbackURL {
+            urls.append(fallback)
         }
+        return urls
     }
-}
-
-private struct MonthReleaseSpotlightCard: View {
-    @EnvironmentObject private var store: AppStore
-
-    let game: Game
-    let isFollowing: Bool
-    let isFavorite: Bool
-    let socialPostCount: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .topLeading) {
-                RemoteMediaImage(primaryURL: game.coverImageURL, fallbackURL: MediaFallback.gameCover)
-                    .frame(width: 176, height: 100)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .bottomLeading) {
+                // No dummy fallback — if all URLs fail, show clean gradient
+                RemoteMediaImage(primaryURL: game.coverImageURL, alternatePrimaryURLs: coverFallbackURLs)
+                    .frame(width: 120, height: 170)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    }
+                    .overlay {
+                        // Gradient for text legibility
                         LinearGradient(
-                            colors: [Color.clear, Color.black.opacity(0.45)],
+                            colors: [Color.clear, Color.clear, Color.black.opacity(0.6)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
 
-                HStack(spacing: 6) {
-                    if isFollowing {
-                        Label("Following", systemImage: "dot.radiowaves.left.and.right")
+                // Status badges
+                HStack(spacing: 4) {
+                    if store.isFollowingGame(game) {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 20, height: 20)
+                            .background(AppTheme.accent.opacity(0.7), in: Circle())
                     }
-                    if isFavorite {
-                        Label("Starred", systemImage: "star.fill")
+                    if store.isFavorite(game) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.yellow)
+                            .frame(width: 20, height: 20)
+                            .background(Color.black.opacity(0.5), in: Circle())
                     }
                 }
-                .font(.caption2.weight(.bold))
-                .labelStyle(.iconOnly)
-                .foregroundStyle(.white.opacity(0.96))
-                .padding(7)
-                .background(Color.black.opacity(0.28), in: Capsule())
-                .padding(8)
-                .opacity((isFollowing || isFavorite) ? 1 : 0)
+                .padding(6)
             }
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text(game.releaseDate.formatted(.dateTime.month(.abbreviated).day()))
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.accentBlue)
-                Text(game.title)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Text(spotlightMetaText)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.66))
-                    .lineLimit(2)
-            }
+            Text(game.title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white.opacity(0.90))
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(width: 120, alignment: .leading)
 
-            HStack(spacing: 8) {
-                NavigationLink {
-                    GameReleaseDetailView(game: game)
-                } label: {
-                    HStack(spacing: 5) {
-                        Text("Details")
-                        Image(systemName: "arrow.right.circle.fill")
+            Text(game.genre)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.white.opacity(0.45))
+                .lineLimit(1)
+                .frame(width: 120, alignment: .leading)
+
+            // Action buttons
+            HStack(spacing: 6) {
+                if game.hasCommunity {
+                    Button {
+                        store.toggleFollowedGame(game)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: store.isFollowingGame(game) ? "dot.radiowaves.left.and.right" : "plus.circle")
+                            Text(store.isFollowingGame(game) ? "Following" : "Follow")
+                        }
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.90))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(
+                            store.isFollowingGame(game) ? AppTheme.accent.opacity(0.25) : Color.white.opacity(0.10),
+                            in: Capsule()
+                        )
+                        .overlay {
+                            Capsule()
+                                .stroke(Color.white.opacity(store.isFollowingGame(game) ? 0.35 : 0.18), lineWidth: 0.5)
+                        }
                     }
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.accent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.07), in: Capsule())
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-
-                Button {
-                    store.toggleFollowedGame(game)
-                } label: {
-                    Image(systemName: isFollowing ? "checkmark.circle.fill" : "plus.circle")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.95))
-                        .frame(width: 28, height: 28)
-                        .background(isFollowing ? AppTheme.accent.opacity(0.24) : Color.white.opacity(0.09), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(isFollowing ? "Unfollow game" : "Follow game")
 
                 Button {
                     store.toggleFavorite(game)
                 } label: {
-                    Image(systemName: isFavorite ? "star.fill" : "star")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(isFavorite ? .yellow : .white.opacity(0.9))
-                        .frame(width: 28, height: 28)
-                        .background(Color.white.opacity(0.09), in: Circle())
+                    Image(systemName: store.isFavorite(game) ? "star.fill" : "star")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(store.isFavorite(game) ? .yellow : .white.opacity(0.70))
+                        .frame(width: 24, height: 24)
+                        .background(Color.white.opacity(0.10), in: Circle())
+                        .overlay {
+                            Circle()
+                                .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                        }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(isFavorite ? "Remove favorite" : "Favorite game")
 
                 Spacer(minLength: 0)
             }
+            .frame(width: 120, alignment: .leading)
         }
-        .frame(width: 176, alignment: .leading)
-        .padding(10)
-        .background(
-            LinearGradient(
-                colors: [Color.white.opacity(0.06), Color.white.opacity(0.03)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.10), lineWidth: 1)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(game.title), releases \(game.releaseDate.formatted(date: .abbreviated, time: .omitted)). \(isFollowing ? "Following." : "") \(socialPostCount > 0 ? "\(socialPostCount) social posts." : "No social posts yet.")")
-    }
-
-    private var spotlightMetaText: String {
-        var parts = ["\(game.publisher)", game.genre]
-        if socialPostCount > 0 {
-            parts.append("\(socialPostCount) post\(socialPostCount == 1 ? "" : "s")")
-        }
-        return parts.joined(separator: " · ")
     }
 }
+
+// MARK: - Game Release Detail View
 
 struct GameReleaseDetailView: View {
     @EnvironmentObject private var store: AppStore
@@ -676,24 +394,26 @@ struct GameReleaseDetailView: View {
                             Spacer()
 
                             HStack(spacing: 10) {
-                                Button {
-                                    store.toggleFollowedGame(game)
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: store.isFollowingGame(game) ? "dot.radiowaves.left.and.right" : "plus.circle")
-                                        Text(store.isFollowingGame(game) ? "Following" : "Follow")
+                                if game.hasCommunity {
+                                    Button {
+                                        store.toggleFollowedGame(game)
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: store.isFollowingGame(game) ? "dot.radiowaves.left.and.right" : "plus.circle")
+                                            Text(store.isFollowingGame(game) ? "Following" : "Follow")
+                                        }
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.white.opacity(0.92))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 7)
+                                        .background(
+                                            store.isFollowingGame(game) ? AppTheme.accent.opacity(0.22) : Color.white.opacity(0.10),
+                                            in: Capsule()
+                                        )
                                     }
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(.white.opacity(0.92))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 7)
-                                    .background(
-                                        store.isFollowingGame(game) ? AppTheme.accent.opacity(0.22) : Color.white.opacity(0.10),
-                                        in: Capsule()
-                                    )
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(store.isFollowingGame(game) ? "Unfollow game" : "Follow game")
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(store.isFollowingGame(game) ? "Unfollow game" : "Follow game")
 
                                 Button {
                                     store.toggleFavorite(game)
@@ -812,6 +532,8 @@ struct GameReleaseDetailView: View {
     }
 }
 
+// MARK: - Screenshot Carousel
+
 private struct ScreenshotCarousel: View {
     let title: String
     let coverURL: URL?
@@ -830,10 +552,7 @@ private struct ScreenshotCarousel: View {
 
     private var galleryPages: [[URL]] {
         var pages = baseURLs.map(candidatesForGalleryPage)
-
-        // Keep gallery compact while ensuring each page has a fallback chain.
         pages = Array(pages.prefix(8))
-
         if pages.isEmpty {
             pages = [[MediaFallback.gameScreenshot]]
         }

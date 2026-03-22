@@ -127,7 +127,6 @@ struct PostMediaPreview: View {
                         } else {
                             RemoteMediaImage(
                                 primaryURL: mediaURL,
-                                fallbackURL: MediaFallback.gameScreenshot,
                                 contentMode: .fit
                             )
                                 .frame(maxWidth: .infinity)

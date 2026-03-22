@@ -437,6 +437,7 @@ final class AppStore: ObservableObject {
         loadReactionTypes()
         subscribeToFeedRealtime()
         startNotificationsPolling()
+        loadCalendarReleases()
         if posts.isEmpty && !feedIsLoading {
             loadHotFeed()
         }
@@ -676,6 +677,22 @@ final class AppStore: ObservableObject {
     func loadHotFeed() {
         Task {
             await refreshHotFeed()
+        }
+    }
+
+    func loadCalendarReleases() {
+        Task {
+            do {
+                let releases = try await feedService.fetchCalendarReleases()
+                await MainActor.run {
+                    self.upcomingReleases = releases
+                    // Also cache these in the game catalog so pills render correctly
+                    self.cacheGameCatalog(releases)
+                }
+            } catch {
+                print("Failed to load calendar releases:", error)
+                // Seed data remains as fallback
+            }
         }
     }
 

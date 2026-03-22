@@ -71,8 +71,10 @@ final class FeedService {
         let id: UUID
         let title: String
         let cover_image_url: String?
+        let cover_image_fallback_url: String?
         let release_date: String?
         let genre: String?
+        let has_community: Bool?
     }
 
     private struct NewPostInsert: Encodable {
@@ -446,7 +448,7 @@ final class FeedService {
 
         let response = try await client
             .from("games")
-            .select("id,title,cover_image_url,release_date,genre")
+            .select("id,title,cover_image_url,cover_image_fallback_url,release_date,genre,has_community")
             .in("id", values: uniqueIDs.map(\.uuidString))
             .execute()
 
@@ -454,6 +456,7 @@ final class FeedService {
         return rows.map { row in
             let releaseDate = row.release_date.flatMap { Self.sqlDateFormatter.date(from: $0) } ?? Date()
             let coverURL = row.cover_image_url.flatMap { URL(string: $0) }
+            let fallbackURL = row.cover_image_fallback_url.flatMap { URL(string: $0) }
             return Game(
                 id: row.id,
                 title: row.title,
@@ -464,7 +467,42 @@ final class FeedService {
                 reviewScores: [],
                 isOwned: false,
                 coverImageURL: coverURL,
-                screenshotURLs: []
+                coverImageFallbackURL: fallbackURL,
+                screenshotURLs: [],
+                hasCommunity: row.has_community ?? false
+            )
+        }
+    }
+
+    /// Fetches all games with release dates from Supabase for the release calendar.
+    /// Returns games across past and future months so the calendar can show history too.
+    func fetchCalendarReleases() async throws -> [Game] {
+        let response = try await client
+            .from("games")
+            .select("id,title,cover_image_url,cover_image_fallback_url,release_date,genre,has_community")
+            .not("release_date", operator: .is, value: "null")
+            .order("release_date", ascending: true)
+            .execute()
+
+        let rows = try JSONDecoder().decode([GameCatalogRow].self, from: response.data)
+        return rows.compactMap { row in
+            guard let dateStr = row.release_date,
+                  let releaseDate = Self.sqlDateFormatter.date(from: dateStr) else { return nil }
+            let coverURL = row.cover_image_url.flatMap { URL(string: $0) }
+            let fallbackURL = row.cover_image_fallback_url.flatMap { URL(string: $0) }
+            return Game(
+                id: row.id,
+                title: row.title,
+                publisher: "Unknown Studio",
+                genre: row.genre ?? "Unknown Genre",
+                releaseDate: releaseDate,
+                similarTitles: [],
+                reviewScores: [],
+                isOwned: false,
+                coverImageURL: coverURL,
+                coverImageFallbackURL: fallbackURL,
+                screenshotURLs: [],
+                hasCommunity: row.has_community ?? false
             )
         }
     }
@@ -895,13 +933,15 @@ final class FeedService {
         let cover_image_url: String?
         let genre: String?
         let category: String?
+        let has_community: Bool?
     }
 
     func fetchOnboardingGameCatalog() async throws -> [OnboardingGameRow] {
         let response = try await client
             .from("games")
-            .select("id,title,cover_image_url,genre,category")
+            .select("id,title,cover_image_url,genre,category,has_community")
             .not("category", operator: .is, value: "null")
+            .eq("has_community", value: true)
             .order("category")
             .order("title")
             .execute()

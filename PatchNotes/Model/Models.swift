@@ -17,7 +17,9 @@ struct Game: Identifiable, Hashable {
     let reviewScores: [ReviewScore]
     let isOwned: Bool
     let coverImageURL: URL?
+    let coverImageFallbackURL: URL?
     let screenshotURLs: [URL]
+    let hasCommunity: Bool
 
     init(
         id: UUID,
@@ -29,7 +31,9 @@ struct Game: Identifiable, Hashable {
         reviewScores: [ReviewScore],
         isOwned: Bool,
         coverImageURL: URL? = nil,
-        screenshotURLs: [URL] = []
+        coverImageFallbackURL: URL? = nil,
+        screenshotURLs: [URL] = [],
+        hasCommunity: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -40,7 +44,9 @@ struct Game: Identifiable, Hashable {
         self.reviewScores = reviewScores
         self.isOwned = isOwned
         self.coverImageURL = coverImageURL
+        self.coverImageFallbackURL = coverImageFallbackURL
         self.screenshotURLs = screenshotURLs
+        self.hasCommunity = hasCommunity
     }
 }
 
